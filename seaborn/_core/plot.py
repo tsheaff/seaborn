@@ -208,6 +208,8 @@ class Plot:
 
     def inplace(self, val: bool | None = None) -> Plot:
 
+        # TODO I am not convinced we need this
+
         if val is None:
             self._inplace = not self._inplace
         else:
@@ -215,6 +217,8 @@ class Plot:
         return self
 
     def on(self, target: Axes | SubFigure | Figure) -> Plot:
+
+        # TODO alternate name: target?
 
         accepted_types: tuple  # Allow tuple of various length
         if hasattr(mpl.figure, "SubFigure"):  # Added in mpl 3.4
@@ -396,6 +400,18 @@ class Plot:
             "row_order": row_order,
             "wrap": wrap,
         })
+
+        return new
+
+    def scale(self, **scales):
+
+        new = self._clone()
+
+        for var, scale in scales.items():
+
+            # TODO where do we do auto inference?
+
+            new._scales[var] = scale
 
         return new
 
@@ -970,13 +986,12 @@ class Plotter:
                     continue
 
                 axis_obj = getattr(subplot["ax"], f"{axis}axis")
-                set_scale_obj(subplot["ax"], axis, scale)
 
                 # Now we need to identify the right data rows to setup the scale with
 
                 # The all-shared case is easiest, every subplot sees all the data
                 if share_state in [True, "all"]:
-                    axis_scale = scale.setup(var_values, axis_obj)
+                    axis_scale = scale.setup(var_values, axis=axis_obj)
                     subplot[f"{axis}scale"] = axis_scale
 
                 # Otherwise, we need to setup separate scales for different subplots
@@ -992,8 +1007,10 @@ class Plotter:
 
                     # Same operation as above, but using the reduced dataset
                     subplot_values = var_data.loc[subplot_data.index].stack()
-                    axis_scale = scale.setup(subplot_values, axis_obj)
+                    axis_scale = scale.setup(subplot_values, axis=axis_obj)
                     subplot[f"{axis}scale"] = axis_scale
+
+                set_scale_obj(subplot["ax"], axis, axis_scale.get_matplotlib_scale())
 
         # Set default axis scales for when they're not defined at this point
         for subplot in self._subplots:
@@ -1145,7 +1162,7 @@ class Plotter:
                 axis = var[0]
                 scale = subplot[f"{axis}scale"]
                 axis_obj = getattr(subplot["ax"], f"{axis}axis")
-                out_df.loc[values.index, var] = scale.forward(values, axis_obj)
+                out_df.loc[values.index, var] = scale.forward(values)  # TODO , axis_obj)
 
         return out_df
 

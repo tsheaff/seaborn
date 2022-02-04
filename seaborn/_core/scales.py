@@ -44,22 +44,27 @@ with attributes copied to the new object.
 """
 from __future__ import annotations
 from copy import copy
+from functools import partial
+from dataclasses import dataclass
 
 import numpy as np
 import pandas as pd
 import matplotlib as mpl
 from matplotlib.scale import LinearScale
 from matplotlib.colors import Normalize
+from matplotlib.axis import Axis
 
 from seaborn._core.rules import VarType, variable_type, categorical_order
 from seaborn._compat import norm_from_scale
 
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
-    from typing import Any, Callable
+    from typing import Any, Callable, Literal
     from pandas import Series
-    from matplotlib.axis import Axis
     from matplotlib.scale import ScaleBase
+    from seaborn._core.mappings import Semantic
+
+    # TODO Self TypeVar for Scale to use in setup?
 
 
 class Scale:
@@ -409,3 +414,366 @@ def get_default_scale(data: Series) -> Scale:
     else:
         # Can't really get here given seaborn logic, but avoid mypy complaints
         raise ValueError("Unknown variable type")
+
+
+# ----------------------------------------------------------------------------------- #
+
+
+# TODO have Scale define width (/height?) (using data?), so e.g. nominal scale sets
+# width=1, continuous scale sets width min(diff(unique(data))), etc.
+
+
+class NewScale:
+    """Base class for seaborn scales, implementing common transform operations."""
+    axis: DummyAxis
+    scale_obj: ScaleBase
+    scale_type: VarType
+
+    def __init__(
+        self,
+        scale_obj: ScaleBase | None,
+        norm: Normalize | tuple[Any, Any] | None,
+    ):
+
+        if norm is not None and not isinstance(norm, (Normalize, tuple)):
+            err = f"`norm` must be a Normalize object or tuple, not {type(norm)}"
+            raise TypeError(err)
+
+        self.scale_obj = scale_obj
+        self.norm = norm_from_scale(scale_obj, norm)
+
+        # Initialize attributes that might not be set by subclasses
+        self.order: list[Any] | None = None
+        self.formatter: Callable[[Any], str] | None = None
+        self.type_declared: bool | None = None
+
+    def _units_seed(self, data: Series) -> Series:
+        """Representative values passed to matplotlib's update_units method."""
+        return self.cast(data).dropna()
+
+    def setup(
+        self,
+        data: Series,
+        semantic: Semantic,
+        axis: Axis | None = None
+    ) -> Scale:
+        """Copy self, attach to the axis, and determine data-dependent parameters."""
+        out = copy(self)
+        out.norm = copy(self.norm)
+        if axis is None:
+            axis = DummyAxis(self)
+        axis.update_units(self._units_seed(data).to_numpy())
+        out.axis = axis
+        # Autoscale norm if unset, nulling out values that will be nulled by transform
+        # (e.g., if log scale, set negative values to na so vmin is always positive)
+        out.normalize(data.where(out.forward(data).notna()))
+        if isinstance(axis, DummyAxis):
+            # TODO This is a little awkward but I think we want to avoid doing this
+            # to an actual Axis (unclear whether using Axis machinery in bits and
+            # pieces is a good design, though)
+            num_data = out.convert(data)
+            vmin, vmax = num_data.min(), num_data.max()
+            axis.set_data_interval(vmin, vmax)
+            margin = .05 * (vmax - vmin)  # TODO configure?
+            axis.set_view_interval(vmin - margin, vmax + margin)
+        return out
+
+    def cast(self, data: Series) -> Series:
+        """Convert data type to canonical type for the scale."""
+        raise NotImplementedError()
+
+    def convert(self, data: Series, axis: Axis | None = None) -> Series:
+        """Convert data type to numeric (plottable) representation, using axis."""
+        if axis is None:
+            axis = self.axis
+        orig_array = self.cast(data).to_numpy()
+        axis.update_units(orig_array)
+        array = axis.convert_units(orig_array)
+        return pd.Series(array, data.index, name=data.name)
+
+    def normalize(self, data: Series) -> Series:
+        """Return numeric data normalized (but not clipped) to unit scaling."""
+        array = self.convert(data).to_numpy()
+        normed_array = self.norm(np.ma.masked_invalid(array))
+        return pd.Series(normed_array, data.index, name=data.name)
+
+    def forward(self, data: Series, axis: Axis | None = None) -> Series:
+        """Apply the transformation from the axis scale."""
+        transform = self.scale_obj.get_transform().transform
+        array = transform(self.convert(data, axis).to_numpy())
+        return pd.Series(array, data.index, name=data.name)
+
+    def reverse(self, data: Series) -> Series:
+        """Invert and apply the transformation from the axis scale."""
+        transform = self.scale_obj.get_transform().inverted().transform
+        array = transform(data.to_numpy())
+        return pd.Series(array, data.index, name=data.name)
+
+    def legend(self, values: list | None = None) -> tuple[list[Any], list[str]]:
+
+        # TODO decide how we want to allow more control over the legend
+        # (e.g., how we could accept a Locator object, or specified number of ticks)
+        # If we move towards a gradient legend for continuous mappings (as I'd like),
+        # it will complicate the value -> label mapping that this assumes.
+
+        # TODO also, decide whether it would be cleaner to define a more structured
+        # class for the return value; the type signatures for the components of the
+        # legend pipeline end up extremely complicated.
+
+        vmin, vmax = self.axis.get_view_interval()
+        if values is None:
+            locs = np.array(self.axis.major.locator())
+            locs = locs[(vmin <= locs) & (locs <= vmax)]
+            values = list(locs)
+        else:
+            locs = self.convert(pd.Series(values)).to_numpy()
+        labels = list(self.axis.major.formatter.format_ticks(locs))
+        return values, labels
+
+
+class ColorScale:  # TODO perhaps as a mixin?
+
+    ...
+
+
+class Nominal(NewScale):
+    # Categorical (convert to strings), unordered
+    ...
+
+
+class Ordinal(NewScale):
+    # Categorical (convert to strings), ordered
+    ...
+
+
+@dataclass
+class Discrete(NewScale):
+    # Numeric, integral, can skip ticks/ticklabels
+    palette: str | list | dict | None = None
+    order: list | None = None
+    # TODO other params
+
+    def setup(
+        self,
+        data: Series,
+        semantic: Semantic,
+        axis: Axis | None = Axis
+    ) -> Scale:
+
+        out = copy(self)
+        return out
+
+
+@dataclass
+class Continuous(NewScale):
+
+    values: tuple[float, float] | None = None
+    norm: tuple[float | None, float | None] | None = None
+    transform: str | tuple[Callable, Callable] | None = None
+    outside: Literal["keep", "drop", "clip"] = "keep"
+    # TODO other params
+
+    def setup(
+        self,
+        data: Series,
+        semantic: Semantic | None = None,
+        axis: Axis | None = None,
+    ) -> Scale:
+
+        out = copy(self)
+
+        if self.values is None and semantic is not None:
+            out.values = semantic.default_range
+
+        if self.norm is None:
+            out._norm = data.min(), data.max()
+        elif self.norm[0] is None:
+            out._norm = data.min(), self.norm[1]
+        elif self.norm[1] is None:
+            out._norm = self.norm[0], data.max()
+        else:
+            out._norm = self.norm
+
+        tr = self.transform
+
+        def get_param(method, default):
+            if tr == method:
+                return default
+            return float(tr[len(method):])
+
+        if tr is None:
+            out._transforms = _make_identity_transforms()
+        elif isinstance(tr, tuple):
+            out._transforms = tr
+        elif isinstance(tr, str):
+            if tr == "ln":
+                out._transforms = _make_log_transforms()
+            elif tr == "logit":
+                base = get_param("logit", 10)
+                out._transforms = _make_logit_transforms(base)
+            elif tr.startswith("log"):
+                base = get_param("log", 10)
+                out._transforms = _make_log_transforms(base)
+            elif tr.startswith("symlog"):
+                c = get_param("symlog", 1)
+                out._transforms = _make_symlog_transforms(c)
+            elif tr.startswith("pow"):
+                exp = get_param("pow", 2)
+                out._transforms = _make_power_transforms(exp)
+            elif tr == "sqrt":
+                out._transforms = _make_sqrt_transforms()
+            else:
+                # TODO useful error message
+                raise ValueError()
+
+        return out
+
+    def forward(self, data: Series) -> Series:
+
+        f, _ = self._transforms
+
+        transformed = f(data)
+
+        if self.norm is None:
+            normed = transformed
+        else:
+            try:
+                orig_state = np.seterr(invalid="raise", divide="raise")
+                vmin, vmax = f(self._norm)
+            except FloatingPointError as err:
+                msg = f"Norm is invalid with Transform function ({self.transform})."
+                raise ValueError(msg) from err
+            finally:
+                np.seterr(**orig_state)
+            normed = (transformed - vmin) / (vmax - vmin)
+
+        # TODO handle values outside norm
+
+        if self.values is None:
+            scaled = normed
+        else:
+            scaled = normed * self.values[1] + self.values[0]
+
+        return scaled
+
+    def reverse(self, data: Series) -> Series:
+
+        _, f = self._transforms
+
+        # TODO currently only call with coordinate data where we don't use norm/values
+        # but should fill that out for completeness — just want a prototype now
+
+        return f(data)
+
+    def normalize(self, data: Series) -> Series:
+        """Return numeric data normalized (but not clipped) to unit scaling."""
+        array = self.convert(data).to_numpy()
+        normed_array = self.norm(np.ma.masked_invalid(array))
+        return pd.Series(normed_array, data.index, name=data.name)
+
+    def get_matplotlib_scale(self):
+
+        axis = "x"  # TODO where to get this from? (It doesn't do much).
+
+        # TODO we may need to propagate the "name" for matplotlib < 3.4?
+        # (see set_scale_obj in compat module)
+
+        return mpl.scale.FuncScale(axis, self._transforms)
+
+
+class Sequential(Continuous):
+
+    ...
+
+
+class Diverging(Continuous):
+
+    ...
+
+
+class Qualitative(Discrete):
+
+    ...
+
+
+class Binned(NewScale):
+    # Needed? Or handle this at layer (in stat or as param, eg binning=)
+    ...
+
+
+
+def infer_scale_type(var: str, data: Series, arg: Any) -> Scale:
+
+    if arg is None:
+        # Note that we also want None in Plot.scale to mean identity
+        # Perhaps have a separate function for inferring just from data?
+        ...
+
+
+def _make_identity_transforms():
+
+    def identity(x):
+        return x
+
+    return identity, identity
+
+
+def _make_logit_transforms(base=None):
+
+    log, exp = _make_log_transforms(base)
+
+    def logit(x):
+        return log(x) - log(1 - x)
+
+    def expit(x):
+        return exp(x) / (1 + exp(x))
+
+    return logit, expit
+
+
+def _make_log_transforms(base=None):
+
+    if base is None:
+        return np.log, np.exp
+    elif base == 2:
+        return np.log2, partial(np.power, 2)
+    elif base == 10:
+        return np.log10, partial(np.power, 10)
+    else:
+        def forward(x):
+            return np.log(x) / np.log(base)
+        return forward, partial(np.power, base)
+
+
+def _make_symlog_transforms(c=1, base=10):
+
+    # From https://iopscience.iop.org/article/10.1088/0957-0233/24/2/027001
+
+    # Note: currently not using base because we only get
+    # one parameter from the string, and are using c
+
+    log, exp = _make_log_transforms(base)
+
+    def symlog(x):
+        return np.sign(x) * log(1 + np.abs(np.divide(x, c)))
+
+    def symexp(x):
+        return np.sign(x) * c * (exp(np.abs(x)) - 1)
+
+    return symlog, symexp
+
+
+def _make_sqrt_transforms():
+
+    return np.sqrt, np.square
+
+
+def _make_power_transforms(exp):
+
+    def forward(x):
+        return np.power(x, exp)
+
+    def inverse(x):
+        return np.power(x, 1 / exp)
+
+    return forward, inverse
