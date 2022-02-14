@@ -15,6 +15,10 @@ from seaborn._core.rules import categorical_order
 from seaborn._core.data import PlotData
 from seaborn._core.subplots import Subplots
 from seaborn._core.groupby import GroupBy
+from seaborn._core.properties import (
+    Color,
+    Coordinate,
+)
 from seaborn._core.mappings import (
     ColorSemantic,
     BooleanSemantic,
@@ -25,6 +29,9 @@ from seaborn._core.mappings import (
     PointSizeSemantic,
     WidthSemantic,
     IdentityMapping,
+)
+from seaborn._core.scales2 import (
+    ScaleSpec,
 )
 from seaborn._core.scales import (
     Scale,
@@ -80,6 +87,13 @@ SEMANTICS = {  # TODO should this be pluggable?
     # Maybe call this VARIABLES and have e.g. ColorSemantic, BaselineVariable?
     "width": WidthSemantic(),
     "baseline": WidthSemantic(),  # TODO
+}
+
+
+PROPERTIES = {
+    "x": Coordinate(),
+    "y": Coordinate(),
+    "color": Color(),
 }
 
 
@@ -715,7 +729,7 @@ class Plot:
         plotter._setup_data(self)
         plotter._setup_figure(self)
         plotter._setup_scales(self)
-        plotter._setup_mappings(self)
+        # TODO plotter._setup_mappings(self)
 
         for layer in plotter._layers:
             plotter._plot_layer(self, layer)
@@ -941,19 +955,35 @@ class Plotter:
                 var = m.group("prefix")
                 axis = m.group("axis")
 
-            # Get the scale object, tracking whether it was explicitly set
-            var_values = var_data.stack()
+            var_values = var_data.stack().rename(var)
+
+            prop = PROPERTIES[var]
+
+            if var in p._scales:
+                arg = p._scales[var]
+                if isinstance(arg, ScaleSpec):
+                    scale = arg
+                elif arg is None:
+                    # TODO this means identity scale
+                    ...
+                else:
+                    scale = prop.infer_scale(arg, var_values)
+            else:
+                scale = prop.default_scale(var_values)
+
+            """
             if var in p._scales:
                 scale = p._scales[var]
                 scale.type_declared = True
             else:
                 scale = get_default_scale(var_values)
                 scale.type_declared = False
+            """
 
             # Initialize the data-dependent parameters of the scale
             # Note that this returns a copy and does not mutate the original
             # This dictionary is used by the semantic mappings
-            self._scales[var] = scale.setup(var_values)
+            self._scales[var] = scale.setup(var_values, prop)
 
             # The mappings are always shared across subplots, but the coordinate
             # scaling can be independent (i.e. with share{x/y} = False).
@@ -991,7 +1021,7 @@ class Plotter:
 
                 # The all-shared case is easiest, every subplot sees all the data
                 if share_state in [True, "all"]:
-                    axis_scale = scale.setup(var_values, axis=axis_obj)
+                    axis_scale = scale.setup(var_values, prop, axis=axis_obj)
                     subplot[f"{axis}scale"] = axis_scale
 
                 # Otherwise, we need to setup separate scales for different subplots
@@ -1007,7 +1037,7 @@ class Plotter:
 
                     # Same operation as above, but using the reduced dataset
                     subplot_values = var_data.loc[subplot_data.index].stack()
-                    axis_scale = scale.setup(subplot_values, axis=axis_obj)
+                    axis_scale = scale.setup(subplot_values, prop, axis=axis_obj)
                     subplot[f"{axis}scale"] = axis_scale
 
                 set_scale_obj(subplot["ax"], axis, axis_scale.get_matplotlib_scale())
@@ -1085,7 +1115,7 @@ class Plotter:
             orient = layer["orient"] or mark._infer_orient(scales)
 
             with (
-                mark.use(self._mappings, orient)
+                mark.use(self._scales, orient)
                 # TODO this doesn't work if stat is None
                 # stat.use(mappings=self._mappings, orient=orient),
             ):
@@ -1137,8 +1167,9 @@ class Plotter:
 
                 mark._plot(split_generator)
 
-        with mark.use(self._mappings, None):  # TODO will we ever need orient?
-            self._update_legend_contents(mark, data)
+        # TODO disabling while hacking on scales
+        # with mark.use(self._mappings, None):  # TODO will we ever need orient?
+        #     self._update_legend_contents(mark, data)
 
     def _scale_coords(
         self,
@@ -1162,7 +1193,7 @@ class Plotter:
                 axis = var[0]
                 scale = subplot[f"{axis}scale"]
                 axis_obj = getattr(subplot["ax"], f"{axis}axis")
-                out_df.loc[values.index, var] = scale.forward(values)  # TODO , axis_obj)
+                out_df.loc[values.index, var] = scale(values)  # TODO , axis_obj)
 
         return out_df
 
@@ -1184,7 +1215,7 @@ class Plotter:
             axes_df = self._filter_subplot_data(df, subplot)[coord_cols]
             for var, values in axes_df.items():
                 scale = subplot[f"{var[0]}scale"]
-                out_df.loc[values.index, var] = scale.reverse(axes_df[var])
+                out_df.loc[values.index, var] = scale.invert_transform(axes_df[var])
 
         return out_df
 
