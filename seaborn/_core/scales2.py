@@ -13,7 +13,7 @@ from seaborn._core.rules import categorical_order
 
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
-    from typing import Any
+    from typing import Any, Callable
     from matplotlib.scale import ScaleBase
     from pandas import Series
     from seaborn._core.properties import Property
@@ -23,20 +23,23 @@ class Scale:
 
     def __init__(
         self,
-        transform_pipe,
+        forward_pipe,
         inverse_pipe=None,
         scale_type=None,
         matplotlib_scale=None,
     ):
 
-        self.transform_pipe = transform_pipe
+        self.forward_pipe = forward_pipe
         self.inverse_pipe = inverse_pipe
         self.scale_type = scale_type
         self.matplotlib_scale = matplotlib_scale
 
+        # TODO need to make this work
+        self.order = None
+
     def __call__(self, data):
 
-        return self._apply_pipeline(data, self.transform_pipe)
+        return self._apply_pipeline(data, self.forward_pipe)
 
     def _apply_pipeline(self, data, pipeline):
 
@@ -50,6 +53,7 @@ class Scale:
         return self._apply_pipeline(data, self.inverse_pipe)
 
     def get_matplotlib_scale(self):
+        # TODO is this the best approach? Should this be "lazy"?
         return self.matplotlib_scale
 
 
@@ -64,8 +68,8 @@ class ScaleSpec:
 
 @dataclass
 class Nominal(ScaleSpec):
-    # Categorical (convert to strings), unordered
 
+    # Categorical (convert to strings), un-sortable
     values: str | list | dict | None = None
 
     scale_type: ClassVar[str] = "categorical"  # TODO
@@ -80,24 +84,23 @@ class Nominal(ScaleSpec):
         transform, inverse = _make_identity_transforms()
 
         # TODO plug into axis
-        levels = categorical_order(data)  # TODO use domain / order
 
-        transform_pipe = [
+        forward_pipe = [
             # np.vectorize(format),  # TODO ensure stringification
-            np.vectorize(levels.index),
-            prop.get_mapping(self.values, data),  # TODO how to parametrize func / dict mapping?
+            prop.get_mapping(self, data),
+            # TODO how to handle color representation consistency?
         ]
 
         inverse_pipe = []
 
         matplotlib_scale = mpl.scale.LinearScale(data.name)
 
-        return Scale(transform_pipe, inverse_pipe, "categorical", matplotlib_scale)
+        return Scale(forward_pipe, inverse_pipe, "categorical", matplotlib_scale)
 
 
 @dataclass
 class Ordinal(ScaleSpec):
-    # Categorical (convert to strings), ordered
+    # Categorical (convert to strings), sortable
     ...
 
 
@@ -133,7 +136,7 @@ class Continuous(ScaleSpec):
         # And specific tick label values? Only allow for categorical scales?
         ...
 
-    # Uow to *allow* use of more complex third party objects? It seems shortsighted
+    # How to *allow* use of more complex third party objects? It seems shortsighted
     # not to maintain capabilities afforded by Scale / Ticker / Locator / UnitData,
     # despite the complexities of that API.
     # def using(self, scale: mpl.scale.ScaleBase) ?
@@ -145,13 +148,16 @@ class Continuous(ScaleSpec):
         axis: Axis | None = None,
     ) -> Scale:
 
+        new = copy(self)
         transform, inverse = self.get_transform()
 
-        transform_pipe = [
+        new._transform = transform
+
+        forward_pipe = [
             pd.to_numeric,
             transform,
-            prop.get_norm(self.norm, data, transform),
-            prop.get_mapping(self.values, data)
+            prop.get_norm(new, data),
+            prop.get_mapping(new, data)
         ]
 
         inverse_pipe = [inverse]
@@ -159,7 +165,7 @@ class Continuous(ScaleSpec):
         # matplotlib_scale = mpl.scale.LinearScale(data.name)
         matplotlib_scale = mpl.scale.FuncScale(data.name, (transform, inverse))
 
-        return Scale(transform_pipe, inverse_pipe, "numeric", matplotlib_scale)
+        return Scale(forward_pipe, inverse_pipe, "numeric", matplotlib_scale)
 
     def get_transform(self):
 
@@ -194,89 +200,6 @@ class Continuous(ScaleSpec):
             else:
                 # TODO useful error message
                 raise ValueError()
-
-    def setup_off(  # Disabling for MVP
-        self,
-        data: Series,
-        semantic: Semantic | None = None,
-        axis: Axis | None = None,
-    ) -> Scale:
-
-        out = copy(self)
-
-        if self.values is None and semantic is not None:
-            out.values = semantic.default_range
-
-        if self.norm is None:
-            out._norm = data.min(), data.max()
-        elif self.norm[0] is None:
-            out._norm = data.min(), self.norm[1]
-        elif self.norm[1] is None:
-            out._norm = self.norm[0], data.max()
-        else:
-            out._norm = self.norm
-
-        tr = self.transform
-
-        return out
-
-    def __call__(self, data: Series) -> Series:
-
-        return self.forward(data)
-
-    def forward(self, data: Series) -> Series:
-
-        f, _ = self._transforms
-
-        transformed = f(data)
-
-        if self.norm is None:
-            normed = transformed
-        else:
-            try:
-                orig_state = np.seterr(invalid="raise", divide="raise")
-                vmin, vmax = f(self._norm)
-            except FloatingPointError as err:
-                msg = f"Norm is invalid with Transform function ({self.transform})."
-                raise ValueError(msg) from err
-            finally:
-                np.seterr(**orig_state)
-            normed = (transformed - vmin) / (vmax - vmin)
-
-        # TODO handle values outside norm
-
-        if self.values is None:
-            scaled = normed
-        else:
-            scaled = normed * self.values[1] + self.values[0]
-
-        return scaled
-
-    def reverse(self, data: Series) -> Series:
-
-        _, f = self._transforms
-
-        # TODO currently only call with coordinate data where we don't use norm/values
-        # but should fill that out for completeness — just want a prototype now
-
-        return f(data)
-
-    def normalize(self, data: Series) -> Series:
-        """Return numeric data normalized (but not clipped) to unit scaling."""
-        array = self.convert(data).to_numpy()
-        normed_array = self.norm(np.ma.masked_invalid(array))
-        return pd.Series(normed_array, data.index, name=data.name)
-
-    def get_matplotlib_scale(self):
-
-        # TODO is this a good name / approach?
-
-        axis = "x"  # TODO where to get this from? (It doesn't do much).
-
-        # TODO we may need to propagate the "name" for matplotlib < 3.4?
-        # (see set_scale_obj in compat module)
-
-        return mpl.scale.FuncScale(axis, self._transforms)
 
 
 # ----------------------------------------------------------------------------------- #
@@ -350,7 +273,7 @@ def _make_symlog_transforms(c=1, base=10):
     # From https://iopscience.iop.org/article/10.1088/0957-0233/24/2/027001
 
     # Note: currently not using base because we only get
-    # one parameter from the string, and are using c
+    # one parameter from the string, and are using c (this is consistent with d3)
 
     log, exp = _make_log_transforms(base)
 

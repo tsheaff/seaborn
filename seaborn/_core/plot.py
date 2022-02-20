@@ -15,10 +15,7 @@ from seaborn._core.rules import categorical_order
 from seaborn._core.data import PlotData
 from seaborn._core.subplots import Subplots
 from seaborn._core.groupby import GroupBy
-from seaborn._core.properties import (
-    Color,
-    Coordinate,
-)
+from seaborn._core.properties import PROPERTIES
 from seaborn._core.mappings import (
     ColorSemantic,
     BooleanSemantic,
@@ -87,13 +84,6 @@ SEMANTICS = {  # TODO should this be pluggable?
     # Maybe call this VARIABLES and have e.g. ColorSemantic, BaselineVariable?
     "width": WidthSemantic(),
     "baseline": WidthSemantic(),  # TODO
-}
-
-
-PROPERTIES = {
-    "x": Coordinate(),
-    "y": Coordinate(),
-    "color": Color(),
 }
 
 
@@ -932,7 +922,8 @@ class Plotter:
         undefined = set(p._scales) - set(variables)
         if undefined:
             err = f"No data found for variable(s) with explicit scale: {undefined}"
-            raise RuntimeError(err)  # FIXME:PlotSpecError
+            # TODO decide whether this is too strict. Maybe a warning?
+            # raise RuntimeError(err)  # FIXME:PlotSpecError
 
         self._scales = {}
 
