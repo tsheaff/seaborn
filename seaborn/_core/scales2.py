@@ -149,23 +149,27 @@ class Continuous(ScaleSpec):
     ) -> Scale:
 
         new = copy(self)
-        transform, inverse = self.get_transform()
+        forward, inverse = self.get_transform()
 
-        new._transform = transform
+        new._transform = forward
+
+        # matplotlib_scale = mpl.scale.LinearScale(data.name)
+        mpl_scale = mpl.scale.FuncScale(data.name, (forward, inverse))
+
+        if axis is None:
+            axis = PseudoAxis(mpl_scale)
+            axis.update_units(data)
 
         forward_pipe = [
-            pd.to_numeric,
-            transform,
+            axis.convert_units,
+            forward,
             prop.get_norm(new, data),
             prop.get_mapping(new, data)
         ]
 
         inverse_pipe = [inverse]
 
-        # matplotlib_scale = mpl.scale.LinearScale(data.name)
-        matplotlib_scale = mpl.scale.FuncScale(data.name, (transform, inverse))
-
-        return Scale(forward_pipe, inverse_pipe, "numeric", matplotlib_scale)
+        return Scale(forward_pipe, inverse_pipe, "numeric", mpl_scale)
 
     def get_transform(self):
 
@@ -204,25 +208,131 @@ class Continuous(ScaleSpec):
 
 # ----------------------------------------------------------------------------------- #
 
+# TODO best way to handle datetime(s)?
 
-class Sequential(Continuous):
-
+class Temporal(ScaleSpec):
     ...
 
 
-class Diverging(Continuous):
-
-    ...
-
-
-class Qualitative(Nominal):
-
+class Calendric(ScaleSpec):
     ...
 
 
 class Binned(ScaleSpec):
     # Needed? Or handle this at layer (in stat or as param, eg binning=)
     ...
+
+
+# TODO any need for color-specific scales?
+
+
+class Sequential(Continuous):
+    ...
+
+
+class Diverging(Continuous):
+    ...
+    # TODO alt approach is to have Continuous.center()
+
+
+class Qualitative(Nominal):
+    ...
+
+
+# ----------------------------------------------------------------------------------- #
+
+
+class PseudoAxis:
+    """
+    Internal class implementing minimal interface equivalent to matplotlib Axis.
+
+    Coordinate variables are typically scaled by attaching the Axis object from
+    the figure where the plot will end up. Matplotlib has no similar concept of
+    and axis for the other mappable variables (color, etc.), but to simplify the
+    code, this object acts like an Axis and can be used to scale other variables.
+
+    """
+    axis_name = ""  # TODO Needs real value? Just used for x/y logic in matplotlib
+
+    def __init__(self, scale):
+
+        self.converter = None
+        self.units = None
+        self.scale = scale
+        self.major = mpl.axis.Ticker()
+
+        scale.set_default_locators_and_formatters(self)
+        # self.set_default_intervals()  TODO mock?
+
+    def set_view_interval(self, vmin, vmax):
+        # TODO this gets called when setting DateTime units,
+        # but we may not need it to do anything
+        self._view_interval = vmin, vmax
+
+    def get_view_interval(self):
+        return self._view_interval
+
+    # TODO do we want to distinguish view/data intervals? e.g. for a legend
+    # we probably want to represent the full range of the data values, but
+    # still norm the colormap. If so, we'll need to track data range separately
+    # from the norm, which we currently don't do.
+
+    def set_data_interval(self, vmin, vmax):
+        self._data_interval = vmin, vmax
+
+    def get_data_interval(self):
+        return self._data_interval
+
+    def get_tick_space(self):
+        # TODO how to do this in a configurable / auto way?
+        # Would be cool to have legend density adapt to figure size, etc.
+        return 5
+
+    def set_major_locator(self, locator):
+        self.major.locator = locator
+        locator.set_axis(self)
+
+    def set_major_formatter(self, formatter):
+        # TODO matplotlib method does more handling (e.g. to set w/format str)
+        self.major.formatter = formatter
+        formatter.set_axis(self)
+
+    def set_minor_locator(self, locator):
+        pass
+
+    def set_minor_formatter(self, formatter):
+        pass
+
+    def set_units(self, units):
+        self.units = units
+
+    def update_units(self, x):
+        """Pass units to the internal converter, potentially updating its mapping."""
+        self.converter = mpl.units.registry.get_converter(x)
+        if self.converter is not None:
+            self.converter.default_units(x, self)
+
+            info = self.converter.axisinfo(self.units, self)
+
+            if info is None:
+                return
+            if info.majloc is not None:
+                # TODO matplotlib method has more conditions here; are they needed?
+                self.set_major_locator(info.majloc)
+            if info.majfmt is not None:
+                self.set_major_formatter(info.majfmt)
+
+            # TODO this is in matplotlib method; do we need this?
+            # self.set_default_intervals()
+
+    def convert_units(self, x):
+        """Return a numeric representation of the input data."""
+        if self.converter is None:
+            return x
+        return self.converter.convert(x, self.units, self)
+
+
+# -
 
 
 def infer_scale_type(var: str, data: Series, arg: Any) -> Scale:
@@ -246,10 +356,12 @@ def _make_logit_transforms(base=None):
     log, exp = _make_log_transforms(base)
 
     def logit(x):
-        return log(x) - log(1 - x)
+        with np.errstate(invalid="ignore", divide="ignore"):
+            return log(x) - log(1 - x)
 
     def expit(x):
-        return exp(x) / (1 + exp(x))
+        with np.errstate(invalid="ignore", divide="ignore"):
+            return exp(x) / (1 + exp(x))
 
     return logit, expit
 
@@ -257,15 +369,25 @@ def _make_logit_transforms(base=None):
 def _make_log_transforms(base=None):
 
     if base is None:
-        return np.log, np.exp
+        fs = np.log, np.exp
     elif base == 2:
-        return np.log2, partial(np.power, 2)
+        fs = np.log2, partial(np.power, 2)
     elif base == 10:
-        return np.log10, partial(np.power, 10)
+        fs = np.log10, partial(np.power, 10)
     else:
         def forward(x):
             return np.log(x) / np.log(base)
-        return forward, partial(np.power, base)
+        fs = forward, partial(np.power, base)
+
+    def log(x):
+        with np.errstate(invalid="ignore", divide="ignore"):
+            return fs[0](x)
+
+    def exp(x):
+        with np.errstate(invalid="ignore", divide="ignore"):
+            return fs[1](x)
+
+    return log, exp
 
 
 def _make_symlog_transforms(c=1, base=10):
@@ -278,25 +400,33 @@ def _make_symlog_transforms(c=1, base=10):
     log, exp = _make_log_transforms(base)
 
     def symlog(x):
-        return np.sign(x) * log(1 + np.abs(np.divide(x, c)))
+        with np.errstate(invalid="ignore", divide="ignore"):
+            return np.sign(x) * log(1 + np.abs(np.divide(x, c)))
 
     def symexp(x):
-        return np.sign(x) * c * (exp(np.abs(x)) - 1)
+        with np.errstate(invalid="ignore", divide="ignore"):
+            return np.sign(x) * c * (exp(np.abs(x)) - 1)
 
     return symlog, symexp
 
 
 def _make_sqrt_transforms():
 
-    return np.sqrt, np.square
+    def sqrt(x):
+        return np.sign(x) * np.sqrt(np.abs(x))
+
+    def square(x):
+        return np.sign(x) * np.square(x)
+
+    return sqrt, square
 
 
 def _make_power_transforms(exp):
 
     def forward(x):
-        return np.power(x, exp)
+        return np.sign(x) * np.power(np.abs(x), exp)
 
     def inverse(x):
-        return np.power(x, 1 / exp)
+        return np.sign(x) * np.power(np.abs(x), 1 / exp)
 
     return forward, inverse

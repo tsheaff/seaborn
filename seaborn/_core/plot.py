@@ -719,7 +719,6 @@ class Plot:
         plotter._setup_data(self)
         plotter._setup_figure(self)
         plotter._setup_scales(self)
-        # TODO plotter._setup_mappings(self)
 
         for layer in plotter._layers:
             plotter._plot_layer(self, layer)
@@ -962,6 +961,7 @@ class Plotter:
             else:
                 scale = prop.default_scale(var_values)
 
+            # TODO commenting out for later removal during scale2 work
             """
             if var in p._scales:
                 scale = p._scales[var]
@@ -1042,43 +1042,6 @@ class Plotter:
                     default_scale = scale_factory(getattr(ax, f"get_{key}")(), axis)
                     # TODO should we also infer categories / datetime units?
                     subplot[key] = NumericScale(default_scale, None)
-
-    def _setup_mappings(self, p: Plot) -> None:
-
-        semantic_vars: list[str]
-        mapping: SemanticMapping
-
-        variables = list(self._data.frame)  # TODO abstract this?
-        for layer in self._layers:
-            variables.extend(c for c in layer["data"].frame if c not in variables)
-        semantic_vars = [v for v in variables if v in SEMANTICS]
-
-        self._mappings = {}
-        for var in semantic_vars:
-            semantic = p._semantics.get(var) or SEMANTICS[var]
-
-            all_values = pd.concat([
-                self._data.frame.get(var),
-                # Only use variables that are *added* at the layer-level
-                *(x["data"].frame.get(var)
-                  for x in self._layers if var in x["variables"])
-            ], axis=1).stack()
-
-            if var in self._scales:
-                scale = self._scales[var]
-                scale.type_declared = True
-            else:
-                scale = get_default_scale(all_values)
-                scale.type_declared = False
-
-            if isinstance(scale, IdentityScale):
-                # We may not need this dummy mapping, if we can consistently
-                # use Mark.resolve to pull values out of data if not defined in mappings
-                # Not doing that now because it breaks some tests, but seems to work.
-                mapping = IdentityMapping(semantic._standardize_values)
-            else:
-                mapping = semantic.setup(all_values, scale)
-            self._mappings[var] = mapping
 
     def _plot_layer(
         self,

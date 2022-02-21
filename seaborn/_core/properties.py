@@ -39,7 +39,7 @@ class Property:
         # handling property-specific possibilities (e.g. for color check that the
         # arg is not a valid palette name) but that could get tricky.
         trans_args = ["log", "symlog", "logit", "pow", "sqrt"]
-        if isinstance(arg, str) and any(k.startswith(arg) for k in trans_args):
+        if isinstance(arg, str) and any(arg.startswith(k) for k in trans_args):
             return Continuous(transform=arg)
 
         if var_type == "categorical":
@@ -54,12 +54,49 @@ class Property:
         return None
 
 
+class NormableProperty(Property):
+
+    def get_norm(self, scale, data):
+        # TODO this should be at a base class level? But maybe not the lowest?
+
+        if isinstance(scale.norm, tuple):
+            vmin, vmax = scale._transform(scale.norm)
+
+            # TODO norm as matplotlib object?
+
+        else:
+            vmin, vmax = scale._transform((data.min(), data.max()))
+
+        # TODO use this object or return a closure over vmin/vmax?
+        norm = mpl.colors.Normalize(vmin, vmax)
+
+        return norm
+
+
+class SizedProperty(NormableProperty):
+
+    # TODO pass default range to constructor and avoid defining a bunch of subclasses?
+    _default_range: tuple[float, float] = (0, 1)
+
+    def get_mapping(self, scale, data):
+
+        if scale.values is None:
+            vmin, vmax = self.default_range
+        else:
+            vmin, vmax = scale.values
+
+        def f(x):
+            return x * (vmax - vmin) + vmin
+
+        return f
+
+
 class Coordinate(Property):
 
     _default_range = None
 
 
-class Color(Property):
+class Color(NormableProperty):
 
     def infer_scale(self, arg, data) -> ScaleSpec:
 
@@ -94,22 +131,6 @@ class Color(Property):
 
         # TODO just to see when we get here
         assert False
-
-    def get_norm(self, scale, data):
-        # TODO this should be at a base class level? But maybe not the lowest?
-
-        if isinstance(scale.norm, tuple):
-            vmin, vmax = scale._transform(scale.norm)
-
-            # TODO norm as matplotlib object?
-
-        else:
-            vmin, vmax = scale._transform((data.min(), data.max()))
-
-        # TODO use this object or return a closure over vmin/vmax?
-        norm = mpl.colors.Normalize(vmin, vmax)
-
-        return norm
 
     def _get_mapping_dict(self, scale, data):
 
@@ -171,24 +192,6 @@ class Color(Property):
             return mapping(x)[:, :3]
 
         return _mapping
-
-
-class SizedProperty(Property):
-
-    # TODO pass default range to constructor and avoid defining a bunch of subclasses?
-    _default_range: tuple[float, float] = (0, 1)
-
-    def get_mapping(self, scale, data):
-
-        if scale.values is None:
-            vmin, vmax = self.default_range
-        else:
-            vmin, vmax = scale.values
-
-        def f(x):
-            return x * (vmax - vmin) + vmin
-
-        return f
 
 
 class PointSize(SizedProperty):
