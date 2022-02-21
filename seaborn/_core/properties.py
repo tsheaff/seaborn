@@ -3,7 +3,7 @@ from __future__ import annotations
 import numpy as np
 import matplotlib as mpl
 
-from seaborn._core.scales2 import ScaleSpec, Nominal, Continuous
+from seaborn._core.scales import ScaleSpec, Nominal, Continuous
 from seaborn._core.rules import categorical_order, variable_type
 from seaborn.palettes import QUAL_PALETTES, color_palette, blend_palette
 from seaborn.utils import get_color_cycle

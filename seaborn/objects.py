@@ -14,4 +14,4 @@ from seaborn._stats.regression import OLSFit, PolyFit  # noqa: F401
 
 from seaborn._core.moves import Jitter, Dodge  # noqa: F401
 
-from seaborn._core.scales2 import Nominal, Discrete, Continuous  # noqa: F401
+from seaborn._core.scales import Nominal, Discrete, Continuous  # noqa: F401

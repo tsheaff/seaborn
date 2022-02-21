@@ -11,7 +11,7 @@ import pytest
 from pandas.testing import assert_series_equal
 
 from seaborn._compat import scale_factory
-from seaborn._core.scales import (
+from seaborn._core.scales_take1 import (
     NumericScale,
     CategoricalScale,
     DateTimeScale,

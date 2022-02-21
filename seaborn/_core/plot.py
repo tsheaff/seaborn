@@ -13,6 +13,7 @@ import matplotlib.pyplot as plt  # TODO defer import into Plot.show()
 from seaborn._compat import scale_factory, set_scale_obj
 from seaborn._core.rules import categorical_order
 from seaborn._core.data import PlotData
+from seaborn._core.scales import ScaleSpec
 from seaborn._core.subplots import Subplots
 from seaborn._core.groupby import GroupBy
 from seaborn._core.properties import PROPERTIES
@@ -27,10 +28,7 @@ from seaborn._core.mappings import (
     WidthSemantic,
     IdentityMapping,
 )
-from seaborn._core.scales2 import (
-    ScaleSpec,
-)
-from seaborn._core.scales import (
+from seaborn._core.scales_take1 import (
     Scale,
     NumericScale,
     CategoricalScale,
@@ -407,7 +405,7 @@ class Plot:
 
         return new
 
-    def scale(self, **scales):
+    def scale(self, **scales: ScaleSpec) -> Plot:
 
         new = self._clone()
 
