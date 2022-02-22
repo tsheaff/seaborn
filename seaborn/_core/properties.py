@@ -132,7 +132,7 @@ class Color(NormableProperty):
         # TODO just to see when we get here
         assert False
 
-    def _get_mapping_dict(self, scale, data):
+    def _get_categorical_mapping(self, scale, data):
 
         levels = categorical_order(data)
         n = len(levels)
@@ -141,7 +141,7 @@ class Color(NormableProperty):
         if isinstance(values, dict):
             # self._check_dict_not_missing_levels(levels, values)
             # TODO where to ensure that dict values have consistent representation?
-            mapping = values
+            colors = [values[x] for x in levels]
         else:
             if values is None:
                 if n <= len(get_color_cycle()):
@@ -152,24 +152,20 @@ class Color(NormableProperty):
             elif isinstance(values, list):
                 # colors = self._ensure_list_not_too_short(levels, values)
                 # TODO check not too long also?
-                ...
+                colors = color_palette(values)
             else:
                 colors = color_palette(values, n)
-            mapping = dict(zip(levels, colors))
 
-        return mapping
+        return colors
 
     def get_mapping(self, scale, data):
 
         # TODO what is best way to do this conditional?
-        from_dict = isinstance(scale, Nominal)
-
-        if from_dict:
-            d = self._get_mapping_dict(scale, data)
+        if isinstance(scale, Nominal):
+            colors = self._get_categorical_mapping(scale, data)
 
             def mapping(x):
-                colors = [d[x_i] for x_i in x]
-                return np.array(colors)
+                return np.take(colors, x.astype(np.intp), axis=0)
 
         elif scale.values is None:
             # TODO data-dependent default type
@@ -178,7 +174,8 @@ class Color(NormableProperty):
         elif isinstance(scale.values, tuple):
             mapping = blend_palette(scale.values, as_cmap=True)
         elif isinstance(scale.values, str):
-            # TODO data-dependent return type
+            # TODO data-dependent return type?
+            # TODO for matplotlib colormaps this will clip, which is different behavior
             mapping = color_palette(scale.values, as_cmap=True)
 
         # TODO just during dev

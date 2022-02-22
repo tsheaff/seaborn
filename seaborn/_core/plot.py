@@ -953,21 +953,11 @@ class Plotter:
                     scale = arg
                 elif arg is None:
                     # TODO this means identity scale
-                    ...
+                    assert None, "needs implementation"
                 else:
                     scale = prop.infer_scale(arg, var_values)
             else:
                 scale = prop.default_scale(var_values)
-
-            # TODO commenting out for later removal during scale2 work
-            """
-            if var in p._scales:
-                scale = p._scales[var]
-                scale.type_declared = True
-            else:
-                scale = get_default_scale(var_values)
-                scale.type_declared = False
-            """
 
             # Initialize the data-dependent parameters of the scale
             # Note that this returns a copy and does not mutate the original
@@ -1029,6 +1019,9 @@ class Plotter:
                     axis_scale = scale.setup(subplot_values, prop, axis=axis_obj)
                     subplot[f"{axis}scale"] = axis_scale
 
+                # TODO should this just happen within scale.setup?
+                # Currently it is disabling the formatters that we set in scale.setup
+                # (Although I don't understand how it worked before)
                 set_scale_obj(subplot["ax"], axis, axis_scale.get_matplotlib_scale())
 
         # Set default axis scales for when they're not defined at this point

@@ -10,6 +10,7 @@ import matplotlib as mpl
 from matplotlib.axis import Axis
 
 from seaborn._core.rules import categorical_order
+from seaborn._compat import set_scale_obj
 
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
@@ -71,6 +72,7 @@ class Nominal(ScaleSpec):
 
     # Categorical (convert to strings), un-sortable
     values: str | list | dict | None = None
+    order: list | None = None
 
     scale_type: ClassVar[str] = "categorical"  # TODO
 
@@ -81,21 +83,31 @@ class Nominal(ScaleSpec):
         axis: Axis | None = None,
     ) -> Scale:
 
-        transform, inverse = _make_identity_transforms()
+        class CatScale(mpl.scale.LinearScale):
+            def set_default_locators_and_formatters(self, axis):
+                pass
+
+        # TODO flexibility over format() which isn't great for numbers / dates
+        units_seed = [format(x) for x in categorical_order(data, self.order)]
+
+        mpl_scale = CatScale(data.name)
+        if axis is None:
+            axis = PseudoAxis(mpl_scale)
+        # TODO use order if provided
+        axis.update_units(units_seed)
 
         # TODO plug into axis
 
         forward_pipe = [
-            # np.vectorize(format),  # TODO ensure stringification
+            np.vectorize(format),  # TODO ensure stringification
+            axis.convert_units,
             prop.get_mapping(self, data),
             # TODO how to handle color representation consistency?
         ]
 
         inverse_pipe = []
 
-        matplotlib_scale = mpl.scale.LinearScale(data.name)
-
-        return Scale(forward_pipe, inverse_pipe, "categorical", matplotlib_scale)
+        return Scale(forward_pipe, inverse_pipe, "categorical", mpl_scale)
 
 
 @dataclass

@@ -9,7 +9,7 @@ from numpy.testing import assert_array_equal
 
 from seaborn._marks.base import Mark, Feature
 from seaborn._core.mappings import LookupMapping
-from seaborn._core.scales import get_default_scale
+from seaborn._core.scales_take1 import get_default_scale
 
 # TODO import MappableFloat
 
