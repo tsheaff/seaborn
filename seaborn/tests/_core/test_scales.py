@@ -8,6 +8,7 @@ from numpy.testing import assert_array_equal
 from pandas.testing import assert_series_equal
 
 from seaborn._core.scales import (
+    Nominal,
     Continuous,
 )
 from seaborn._core.properties import (
@@ -98,3 +99,54 @@ class TestContinuous:
         cmap = color_palette("ch:", as_cmap=True)
         s = Continuous(transform="log").setup(x, Color())
         assert_array_equal(s(x), cmap([0, .5, 1])[:, :3])  # FIXME RGBA
+
+
+class TestNominal:
+
+    @pytest.fixture
+    def x(self):
+        return pd.Series(["a", "c", "b", "c"], name="x")
+
+    def test_coordinate_defaults(self, x):
+
+        s = Nominal().setup(x, Coordinate())
+        assert_array_equal(s(x), np.array([0, 1, 2, 1], float))
+        assert_array_equal(s.invert_transform(s(x)), s(x))
+
+    def test_coordinate_with_order(self, x):
+
+        s = Nominal(order=["a", "b", "c"]).setup(x, Coordinate())
+        assert_array_equal(s(x), np.array([0, 2, 1, 2], float))
+        assert_array_equal(s.invert_transform(s(x)), s(x))
+
+    def test_coordinate_with_subset_order(self, x):
+
+        s = Nominal(order=["c", "a"]).setup(x, Coordinate())
+        assert_array_equal(s(x), np.array([1, 0, np.nan, 0], float))
+        assert_array_equal(s.invert_transform(s(x)), s(x))
+
+    def test_coordinate_axis(self, x):
+
+        ax = mpl.figure.Figure().subplots()
+        s = Nominal().setup(x, Coordinate(), ax.xaxis)
+        assert_array_equal(s(x), np.array([0, 1, 2, 1], float))
+        f = ax.xaxis.get_major_formatter()
+        assert f.format_ticks([0, 1, 2]) == ["a", "c", "b"]
+
+    def test_coordinate_axis_with_order(self, x):
+
+        order = ["a", "b", "c"]
+        ax = mpl.figure.Figure().subplots()
+        s = Nominal(order=order).setup(x, Coordinate(), ax.xaxis)
+        assert_array_equal(s(x), np.array([0, 2, 1, 2], float))
+        f = ax.xaxis.get_major_formatter()
+        assert f.format_ticks([0, 1, 2]) == order
+
+    def test_coordinate_axis_with_subset_order(self, x):
+
+        order = ["c", "a"]
+        ax = mpl.figure.Figure().subplots()
+        s = Nominal(order=order).setup(x, Coordinate(), ax.xaxis)
+        assert_array_equal(s(x), np.array([1, 0, np.nan, 0], float))
+        f = ax.xaxis.get_major_formatter()
+        assert f.format_ticks([0, 1, 2]) == [*order, ""]

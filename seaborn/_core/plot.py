@@ -1024,16 +1024,6 @@ class Plotter:
                 # (Although I don't understand how it worked before)
                 set_scale_obj(subplot["ax"], axis, axis_scale.get_matplotlib_scale())
 
-        # Set default axis scales for when they're not defined at this point
-        for subplot in self._subplots:
-            ax = subplot["ax"]
-            for axis in "xy":
-                key = f"{axis}scale"
-                if key not in subplot:
-                    default_scale = scale_factory(getattr(ax, f"get_{key}")(), axis)
-                    # TODO should we also infer categories / datetime units?
-                    subplot[key] = NumericScale(default_scale, None)
-
     def _plot_layer(
         self,
         p: Plot,

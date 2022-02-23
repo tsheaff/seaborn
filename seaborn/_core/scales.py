@@ -84,23 +84,32 @@ class Nominal(ScaleSpec):
     ) -> Scale:
 
         class CatScale(mpl.scale.LinearScale):
+            # TODO turn this into a real thing I guess
             def set_default_locators_and_formatters(self, axis):
                 pass
-
-        # TODO flexibility over format() which isn't great for numbers / dates
-        units_seed = [format(x) for x in categorical_order(data, self.order)]
 
         mpl_scale = CatScale(data.name)
         if axis is None:
             axis = PseudoAxis(mpl_scale)
-        # TODO use order if provided
+
+        # TODO flexibility over format() which isn't great for numbers / dates
+        stringify = np.vectorize(format)
+
+        units_seed = stringify(categorical_order(data, self.order))
         axis.update_units(units_seed)
 
-        # TODO plug into axis
+        # TODO define this more centrally
+        def convert_units(x):
+            # TODO only do this with explicit order?
+            # (But also category dtype?)
+            keep = np.in1d(x, units_seed)
+            out = np.full(x.shape, np.nan)
+            out[keep] = axis.convert_units(x[keep])
+            return out
 
         forward_pipe = [
-            np.vectorize(format),  # TODO ensure stringification
-            axis.convert_units,
+            stringify,
+            convert_units,
             prop.get_mapping(self, data),
             # TODO how to handle color representation consistency?
         ]
