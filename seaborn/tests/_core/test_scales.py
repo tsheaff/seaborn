@@ -12,8 +12,8 @@ from seaborn._core.scales import (
     Continuous,
 )
 from seaborn._core.properties import (
-    Coordinate,
     SizedProperty,
+    Coordinate,
     Color,
 )
 from seaborn.palettes import color_palette
@@ -150,3 +150,29 @@ class TestNominal:
         assert_array_equal(s(x), np.array([1, 0, np.nan, 0], float))
         f = ax.xaxis.get_major_formatter()
         assert f.format_ticks([0, 1, 2]) == [*order, ""]
+
+    def test_color_defaults(self, x):
+
+        s = Nominal().setup(x, Color())
+        cs = color_palette()
+        assert_array_equal(s(x), [cs[0], cs[1], cs[2], cs[1]])
+
+    def test_color_named_palette(self, x):
+
+        pal = "flare"
+        s = Nominal(pal).setup(x, Color())
+        cs = color_palette(pal, 3)
+        assert_array_equal(s(x), [cs[0], cs[1], cs[2], cs[1]])
+
+    def test_color_list_palette(self, x):
+
+        cs = color_palette("crest", 3)
+        s = Nominal(cs).setup(x, Color())
+        assert_array_equal(s(x), [cs[0], cs[1], cs[2], cs[1]])
+
+    def test_color_dict_palette(self, x):
+
+        cs = color_palette("crest", 3)
+        pal = dict(zip("bac", cs))
+        s = Nominal(pal).setup(x, Color())
+        assert_array_equal(s(x), [cs[1], cs[2], cs[0], cs[2]])
