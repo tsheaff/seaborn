@@ -945,7 +945,7 @@ class Plotter:
 
             var_values = var_data.stack().rename(var)
 
-            prop = PROPERTIES[var]
+            prop = PROPERTIES[var if axis is None else axis]
 
             if var in p._scales:
                 arg = p._scales[var]
@@ -1021,7 +1021,8 @@ class Plotter:
 
                 # TODO should this just happen within scale.setup?
                 # Currently it is disabling the formatters that we set in scale.setup
-                # (Although I don't understand how it worked before)
+                # The other option (using currently) is to define custom matplotlib
+                # scales that don't change other axis properties
                 set_scale_obj(subplot["ax"], axis, axis_scale.get_matplotlib_scale())
 
     def _plot_layer(

@@ -11,6 +11,7 @@ from seaborn.utils import get_color_cycle
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from pandas import Series
+    from matplotlib.markers import MarkerStyle
 
 
 class Property:
@@ -94,6 +95,107 @@ class SizedProperty(NormableProperty):
 class Coordinate(Property):
 
     _default_range = None
+
+
+class ObjectProperty(Property):
+    # TODO better name this is unclear!
+
+    def infer_scale(self, arg, data):
+
+        return Nominal(arg)
+
+    def get_mapping(self, scale, data):
+
+        levels = categorical_order(data)
+        n = len(levels)
+
+        if isinstance(scale.values, dict):
+            # self._check_dict_not_missing_levels(levels, values)
+            # TODO where to ensure that dict values have consistent representation?
+            values = [scale.values[x] for x in levels]
+        else:
+            if scale.values is None:
+                values = self._default_values(n)
+            elif isinstance(scale.values, list):
+                # colors = self._ensure_list_not_too_short(levels, values)
+                # TODO check not too long also?
+                values = scale.values
+            else:
+                # TODO nice error message
+                assert False, values
+
+        # TODO this should be abstract "standardization" method
+        values = self._standardize_values(values)
+
+        def mapping(x):
+            return np.take(values, x.astype(np.intp), axis=0)
+
+        return mapping
+
+    def _default_values(self, n):
+        raise NotImplementedError()
+
+    def _standardize_values(self, values):
+
+        return values
+
+
+class Marker(ObjectProperty):
+
+    # TODO should we have named marker "palettes"? (e.g. see d3 options)
+
+    # TODO will need abstraction to share with LineStyle, etc.
+
+    # TODO need some sort of "require_scale" functionality
+    # to raise when we get the wrong kind explicitly specified
+
+    def standardize_values(self, values):
+
+        return [mpl.markers.MarkerStyle(x) for x in values]
+
+    def _default_values(self, n: int) -> list[MarkerStyle]:
+        """Build an arbitrarily long list of unique marker styles for points.
+
+        Parameters
+        ----------
+        n : int
+            Number of unique marker specs to generate.
+
+        Returns
+        -------
+        markers : list of string or tuples
+            Values for defining :class:`matplotlib.markers.MarkerStyle` objects.
+            All markers will be filled.
+
+        """
+        # Start with marker specs that are well distinguishable
+        markers = [
+            "o",
+            "X",
+            (4, 0, 45),
+            "P",
+            (4, 0, 0),
+            (4, 1, 0),
+            "^",
+            (4, 1, 45),
+            "v",
+        ]
+
+        # Now generate more from regular polygons of increasing order
+        s = 5
+        while len(markers) < n:
+            a = 360 / (s + 1) / 2
+            markers.extend([
+                (s + 1, 1, a),
+                (s + 1, 0, a),
+                (s, 1, 0),
+                (s, 0, 0),
+            ])
+            s += 1
+
+        markers = [mpl.markers.MarkerStyle(m) for m in markers[:n]]
+
+        return markers
 
 
 class Color(NormableProperty):
@@ -213,7 +315,7 @@ PROPERTIES = {
     "fillalpha": ...,
     "edgealpha": ...,
     "fill": ...,
-    "marker": ...,
+    "marker": Marker(),
     "pointsize": PointSize(),
     "linewidth": LineWidth(),
     "edgewidth": ...

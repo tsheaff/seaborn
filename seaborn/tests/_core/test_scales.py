@@ -13,6 +13,7 @@ from seaborn._core.scales import (
 )
 from seaborn._core.properties import (
     SizedProperty,
+    ObjectProperty,
     Coordinate,
     Color,
 )
@@ -107,6 +108,10 @@ class TestNominal:
     def x(self):
         return pd.Series(["a", "c", "b", "c"], name="x")
 
+    @pytest.fixture
+    def y(self):
+        return pd.Series([1, -1.5, 3, -1.5], name="y")
+
     def test_coordinate_defaults(self, x):
 
         s = Nominal().setup(x, Coordinate())
@@ -151,6 +156,23 @@ class TestNominal:
         f = ax.xaxis.get_major_formatter()
         assert f.format_ticks([0, 1, 2]) == [*order, ""]
 
+    def test_coordinate_numeric_data(self, y):
+
+        ax = mpl.figure.Figure().subplots()
+        s = Nominal().setup(y, Coordinate(), ax.yaxis)
+        assert_array_equal(s(y), np.array([1, 0, 2, 0], float))
+        f = ax.yaxis.get_major_formatter()
+        assert f.format_ticks([0, 1, 2]) == ["-1.5", "1.0", "3.0"]
+
+    def test_coordinate_numeric_data_with_order(self, y):
+
+        order = [1, 4, -1.5]
+        ax = mpl.figure.Figure().subplots()
+        s = Nominal(order=order).setup(y, Coordinate(), ax.yaxis)
+        assert_array_equal(s(y), np.array([0, 2, np.nan, 2], float))
+        f = ax.yaxis.get_major_formatter()
+        assert f.format_ticks([0, 1, 2]) == ["1.0", "4.0", "-1.5"]
+
     def test_color_defaults(self, x):
 
         s = Nominal().setup(x, Color())
@@ -176,3 +198,21 @@ class TestNominal:
         pal = dict(zip("bac", cs))
         s = Nominal(pal).setup(x, Color())
         assert_array_equal(s(x), [cs[1], cs[2], cs[0], cs[2]])
+
+    def test_color_numeric_data(self, y):
+
+        s = Nominal().setup(y, Color())
+        cs = color_palette()
+        assert_array_equal(s(y), [cs[1], cs[0], cs[2], cs[0]])
+
+    def test_object_list(self, x):
+
+        vs = ["x", "y", "z"]
+        s = Nominal(vs).setup(x, ObjectProperty())
+        assert_array_equal(s(x), ["x", "y", "z", "y"])
+
+    def test_object_dict(self, x):
+
+        vs = {"a": "x", "b": "y", "c": "z"}
+        s = Nominal(vs).setup(x, ObjectProperty())
+        assert_array_equal(s(x), ["x", "z", "y", "z"])

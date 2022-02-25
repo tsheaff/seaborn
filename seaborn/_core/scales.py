@@ -95,8 +95,11 @@ class Nominal(ScaleSpec):
         # TODO flexibility over format() which isn't great for numbers / dates
         stringify = np.vectorize(format)
 
-        units_seed = stringify(categorical_order(data, self.order))
-        axis.update_units(units_seed)
+        units_seed = categorical_order(data, self.order)
+        # TODO array cast necessary to handle float/int mixture, which we need
+        # to solve in a more systematic way probably
+        # (i.e. if we have [1, 2.5], do we want [1.0, 2.5]? Unclear)
+        axis.update_units(stringify(np.array(units_seed)))
 
         # TODO define this more centrally
         def convert_units(x):
@@ -104,11 +107,10 @@ class Nominal(ScaleSpec):
             # (But also category dtype?)
             keep = np.in1d(x, units_seed)
             out = np.full(x.shape, np.nan)
-            out[keep] = axis.convert_units(x[keep])
+            out[keep] = axis.convert_units(stringify(x[keep]))
             return out
 
         forward_pipe = [
-            stringify,
             convert_units,
             prop.get_mapping(self, data),
             # TODO how to handle color representation consistency?
