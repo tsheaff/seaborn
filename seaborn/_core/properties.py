@@ -1,4 +1,5 @@
 from __future__ import annotations
+import itertools
 
 import numpy as np
 import matplotlib as mpl
@@ -113,22 +114,20 @@ class ObjectProperty(Property):
             # self._check_dict_not_missing_levels(levels, values)
             # TODO where to ensure that dict values have consistent representation?
             values = [scale.values[x] for x in levels]
+        elif isinstance(scale.values, list):
+            # colors = self._ensure_list_not_too_short(levels, values)
+            # TODO check not too long also?
+            values = scale.values
+        elif scale.values is None:
+            values = self._default_values(n)
         else:
-            if scale.values is None:
-                values = self._default_values(n)
-            elif isinstance(scale.values, list):
-                # colors = self._ensure_list_not_too_short(levels, values)
-                # TODO check not too long also?
-                values = scale.values
-            else:
-                # TODO nice error message
-                assert False, values
+            # TODO nice error message
+            assert False, values
 
-        # TODO this should be abstract "standardization" method
         values = self._standardize_values(values)
 
         def mapping(x):
-            return np.take(values, x.astype(np.intp), axis=0)
+            return [values[ix] for ix in x.astype(np.intp)]
 
         return mapping
 
@@ -149,7 +148,7 @@ class Marker(ObjectProperty):
     # TODO need some sort of "require_scale" functionality
     # to raise when we get the wrong kind explicitly specified
 
-    def standardize_values(self, values):
+    def _standardize_values(self, values):
 
         return [mpl.markers.MarkerStyle(x) for x in values]
 
@@ -196,6 +195,99 @@ class Marker(ObjectProperty):
         markers = [mpl.markers.MarkerStyle(m) for m in markers[:n]]
 
         return markers
+
+
+class LineStyle(ObjectProperty):
+
+    def _default_values(self, n: int):  # -> list[DashPatternWithOffset]:
+        """Build an arbitrarily long list of unique dash styles for lines.
+
+        Parameters
+        ----------
+        n : int
+            Number of unique dash specs to generate.
+
+        Returns
+        -------
+        dashes : list of strings or tuples
+            Valid arguments for the ``dashes`` parameter on
+            :class:`matplotlib.lines.Line2D`. The first spec is a solid
+            line (``""``), the remainder are sequences of long and short
+            dashes.
+
+        """
+        # Start with dash specs that are well distinguishable
+        dashes = [  # TODO : list[str | DashPattern] = [
+            "-",  # TODO do we need to handle this elsewhere for backcompat?
+            (4, 1.5),
+            (1, 1),
+            (3, 1.25, 1.5, 1.25),
+            (5, 1, 1, 1),
+        ]
+
+        # Now programmatically build as many as we need
+        p = 3
+        while len(dashes) < n:
+
+            # Take combinations of long and short dashes
+            a = itertools.combinations_with_replacement([3, 1.25], p)
+            b = itertools.combinations_with_replacement([4, 1], p)
+
+            # Interleave the combinations, reversing one of the streams
+            segment_list = itertools.chain(*zip(
+                list(a)[1:-1][::-1],
+                list(b)[1:-1]
+            ))
+
+            # Now insert the gaps
+            for segments in segment_list:
+                gap = min(segments)
+                spec = tuple(itertools.chain(*((seg, gap) for seg in segments)))
+                dashes.append(spec)
+
+            p += 1
+
+        return self._standardize_values(dashes)
+
+    def _standardize_values(self, values):
+        """Standardize values as dash pattern (with offset)."""
+        return [self._get_dash_pattern(x) for x in values]
+
+    @staticmethod
+    def _get_dash_pattern(style: str | DashPattern) -> DashPatternWithOffset:
+        """Convert linestyle arguments to dash pattern with offset."""
+        # Copied and modified from Matplotlib 3.4
+        # go from short hand -> full strings
+        ls_mapper = {'-': 'solid', '--': 'dashed', '-.': 'dashdot', ':': 'dotted'}
+        if isinstance(style, str):
+            style = ls_mapper.get(style, style)
+            # un-dashed styles
+            if style in ['solid', 'none', 'None']:
+                offset = 0
+                dashes = None
+            # dashed styles
+            elif style in ['dashed', 'dashdot', 'dotted']:
+                offset = 0
+                dashes = tuple(mpl.rcParams[f'lines.{style}_pattern'])
+
+        elif isinstance(style, tuple):
+            if len(style) > 1 and isinstance(style[1], tuple):
+                offset, dashes = style
+            elif len(style) > 1 and style[1] is None:
+                offset, dashes = style
+            else:
+                offset = 0
+                dashes = style
+        else:
+            raise ValueError(f'Unrecognized linestyle: {style}')
+
+        # normalize offset to be positive and shorter than the dash cycle
+        if dashes is not None:
+            dsum = sum(dashes)
+            if dsum:
+                offset %= dsum
+
+        return offset, dashes
 
 
 class Color(NormableProperty):
@@ -316,6 +408,7 @@ PROPERTIES = {
     "edgealpha": ...,
     "fill": ...,
     "marker": Marker(),
+    "linestyle": LineStyle(),
     "pointsize": PointSize(),
     "linewidth": LineWidth(),
     "edgewidth": ...

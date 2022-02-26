@@ -44,9 +44,19 @@ class Scale:
 
     def _apply_pipeline(self, data, pipeline):
 
+        # TODO sometimes we need to handle scalars (e.g. lines)
+        # but what is the best way to do that?
+        scalar_data = np.isscalar(data)
+        if scalar_data:
+            data = np.array([data])
+
         for func in pipeline:
             if func is not None:
                 data = func(data)
+
+        if scalar_data:
+            data = data[0]
+
         return data
 
     def invert_transform(self, data):
@@ -106,7 +116,7 @@ class Nominal(ScaleSpec):
             # TODO only do this with explicit order?
             # (But also category dtype?)
             keep = np.in1d(x, units_seed)
-            out = np.full(x.shape, np.nan)
+            out = np.full(len(x), np.nan)
             out[keep] = axis.convert_units(stringify(x[keep]))
             return out
 

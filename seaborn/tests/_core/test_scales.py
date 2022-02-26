@@ -205,6 +205,15 @@ class TestNominal:
         cs = color_palette()
         assert_array_equal(s(y), [cs[1], cs[0], cs[2], cs[0]])
 
+    def test_object_defaults(self, x):
+
+        class MockProperty(ObjectProperty):
+            def _default_values(self, n):
+                return list("xyz"[:n])
+
+        s = Nominal().setup(x, MockProperty())
+        assert_array_equal(s(x), ["x", "y", "z", "y"])
+
     def test_object_list(self, x):
 
         vs = ["x", "y", "z"]
