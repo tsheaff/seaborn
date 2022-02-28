@@ -15,7 +15,9 @@ from seaborn._core.properties import (
     SizedProperty,
     ObjectProperty,
     Coordinate,
+    Alpha,
     Color,
+    Fill,
 )
 from seaborn.palettes import color_palette
 
@@ -205,6 +207,22 @@ class TestNominal:
         cs = color_palette()
         assert_array_equal(s(y), [cs[1], cs[0], cs[2], cs[0]])
 
+    def test_color_numeric_with_order_subset(self, y):
+
+        s = Nominal(order=[-1.5, 1]).setup(y, Color())
+        c1, c2 = color_palette(n_colors=2)
+        null = (np.nan, np.nan, np.nan)
+        assert_array_equal(s(y), [c2, c1, null, c1])
+
+    @pytest.mark.xfail(reason="Need to sort out float/int order")
+    def test_color_numeric_int_float_mix(self):
+
+        z = pd.Series([1, 1.5, 2], name="z")
+        s = Nominal(order=[1, 2]).setup(z, Color())
+        c1, c2 = color_palette(n_colors=2)
+        null = (np.nan, np.nan, np.nan)
+        assert_array_equal(s(z), [c1, null, c2])
+
     def test_object_defaults(self, x):
 
         class MockProperty(ObjectProperty):
@@ -212,16 +230,59 @@ class TestNominal:
                 return list("xyz"[:n])
 
         s = Nominal().setup(x, MockProperty())
-        assert_array_equal(s(x), ["x", "y", "z", "y"])
+        assert s(x) == ["x", "y", "z", "y"]
 
     def test_object_list(self, x):
 
         vs = ["x", "y", "z"]
         s = Nominal(vs).setup(x, ObjectProperty())
-        assert_array_equal(s(x), ["x", "y", "z", "y"])
+        assert s(x) == ["x", "y", "z", "y"]
 
     def test_object_dict(self, x):
 
         vs = {"a": "x", "b": "y", "c": "z"}
         s = Nominal(vs).setup(x, ObjectProperty())
-        assert_array_equal(s(x), ["x", "z", "y", "z"])
+        assert s(x) == ["x", "z", "y", "z"]
+
+    def test_object_order(self, x):
+
+        vs = ["x", "y", "z"]
+        s = Nominal(vs, order=["c", "a", "b"]).setup(x, ObjectProperty())
+        assert s(x) == ["y", "x", "z", "x"]
+
+    def test_object_order_subset(self, x):
+
+        vs = ["x", "y"]
+        s = Nominal(vs, order=["a", "c"]).setup(x, ObjectProperty())
+        assert s(x) == ["x", "y", None, "y"]
+
+    def test_objects_that_are_weird(self, x):
+
+        vs = [("x", 1), (None, None, 0), {}]
+        s = Nominal(vs).setup(x, ObjectProperty())
+        assert s(x) == [vs[0], vs[1], vs[2], vs[1]]
+
+    def test_alpha_default(self, x):
+
+        s = Nominal().setup(x, Alpha())
+        assert_array_equal(s(x), [.95, .55, .15, .55])
+
+    def test_fill(self):
+
+        x = pd.Series(["a", "a", "b", "a"], name="x")
+        s = Nominal().setup(x, Fill())
+        assert_array_equal(s(x), [True, True, False, True])
+
+    def test_fill_dict(self):
+
+        x = pd.Series(["a", "a", "b", "a"], name="x")
+        vs = {"a": False, "b": True}
+        s = Nominal(vs).setup(x, Fill())
+        assert_array_equal(s(x), [False, False, True, False])
+
+    def test_fill_nunique_warning(self):
+
+        x = pd.Series(["a", "b", "c", "a", "b"], name="x")
+        with pytest.warns(UserWarning, match="There are only two possible"):
+            s = Nominal().setup(x, Fill())
+        assert_array_equal(s(x), [True, False, True, True, False])

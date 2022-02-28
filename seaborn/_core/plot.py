@@ -16,7 +16,7 @@ from seaborn._core.data import PlotData
 from seaborn._core.scales import ScaleSpec
 from seaborn._core.subplots import Subplots
 from seaborn._core.groupby import GroupBy
-from seaborn._core.properties import PROPERTIES
+from seaborn._core.properties import PROPERTIES, Property
 from seaborn._core.mappings import (
     ColorSemantic,
     BooleanSemantic,
@@ -34,7 +34,6 @@ from seaborn._core.scales_take1 import (
     CategoricalScale,
     DateTimeScale,
     IdentityScale,
-    get_default_scale,
 )
 
 from typing import TYPE_CHECKING
@@ -945,7 +944,9 @@ class Plotter:
 
             var_values = var_data.stack().rename(var)
 
-            prop = PROPERTIES[var if axis is None else axis]
+            # TODO what is the best way to allow undefined properties?
+            # i.e. it is useful for extensions and non-graphical variables.
+            prop = PROPERTIES.get(var if axis is None else axis, Property())
 
             if var in p._scales:
                 arg = p._scales[var]
@@ -1104,8 +1105,8 @@ class Plotter:
                 mark._plot(split_generator)
 
         # TODO disabling while hacking on scales
-        # with mark.use(self._mappings, None):  # TODO will we ever need orient?
-        #     self._update_legend_contents(mark, data)
+        with mark.use(self._scales, None):  # TODO will we ever need orient?
+            self._update_legend_contents(mark, data)
 
     def _scale_coords(
         self,
@@ -1124,12 +1125,10 @@ class Plotter:
         for subplot in subplots:
             axes_df = self._filter_subplot_data(df, subplot)[coord_cols]
             with pd.option_context("mode.use_inf_as_null", True):
-                axes_df = axes_df.dropna()  # TODO always wanted?
+                axes_df = axes_df.dropna()  # TODO do we actually need/want this?
             for var, values in axes_df.items():
-                axis = var[0]
-                scale = subplot[f"{axis}scale"]
-                axis_obj = getattr(subplot["ax"], f"{axis}axis")
-                out_df.loc[values.index, var] = scale(values)  # TODO , axis_obj)
+                scale = subplot[f"{var[0]}scale"]
+                out_df.loc[values.index, var] = scale(values)
 
         return out_df
 
@@ -1273,7 +1272,7 @@ class Plotter:
 
     def _update_legend_contents(self, mark: Mark, data: PlotData) -> None:
         """Add legend artists / labels for one layer in the plot."""
-        legend_vars = data.frame.columns.intersection(self._mappings)
+        legend_vars = data.frame.columns.intersection(self._scales)
 
         # First pass: Identify the values that will be shown for each variable
         schema: list[tuple[
@@ -1281,7 +1280,7 @@ class Plotter:
         ]] = []
         schema = []
         for var in legend_vars:
-            var_legend = self._mappings[var].legend
+            var_legend = self._scales[var].legend
             if var_legend is not None:
                 values, labels = var_legend
                 for (_, part_id), part_vars, _ in schema:

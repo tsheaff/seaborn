@@ -1,7 +1,9 @@
 from __future__ import annotations
 import itertools
+import warnings
 
 import numpy as np
+import pandas as pd
 import matplotlib as mpl
 
 from seaborn._core.scales import ScaleSpec, Nominal, Continuous
@@ -16,6 +18,9 @@ if TYPE_CHECKING:
 
 
 class Property:
+
+    legend = False
+    normed = True
 
     @property
     def default_range(self) -> tuple[float, float]:
@@ -44,43 +49,66 @@ class Property:
         if isinstance(arg, str) and any(arg.startswith(k) for k in trans_args):
             return Continuous(transform=arg)
 
+        # TODO should Property have a default transform, i.e. "sqrt" for PointSize?
+
         if var_type == "categorical":
             return Nominal(arg)
         else:
             return Continuous(arg)
 
-    def get_norm(self, scale, data):
-        return None
-
     def get_mapping(self, scale, data):
         return None
 
 
-class NormableProperty(Property):
+class Coordinate(Property):
 
-    def get_norm(self, scale, data):
-        # TODO this should be at a base class level? But maybe not the lowest?
-
-        if isinstance(scale.norm, tuple):
-            vmin, vmax = scale._transform(scale.norm)
-
-            # TODO norm as matplotlib object?
-
-        else:
-            vmin, vmax = scale._transform((data.min(), data.max()))
-
-        # TODO use this object or return a closure over vmin/vmax?
-        norm = mpl.colors.Normalize(vmin, vmax)
-
-        return norm
+    legend = False
+    normed = False
+    _default_range = None
 
 
-class SizedProperty(NormableProperty):
+class SemanticProperty(Property):
+    legend = True
+
+
+class SizedProperty(SemanticProperty):
 
     # TODO pass default range to constructor and avoid defining a bunch of subclasses?
     _default_range: tuple[float, float] = (0, 1)
 
+    def _get_categorical_mapping(self, scale, data):
+
+        levels = categorical_order(data, scale.order)
+
+        if scale.values is None:
+            vmin, vmax = self.default_range
+            values = np.linspace(vmax, vmin, len(levels))
+        elif isinstance(scale.values, tuple):
+            vmin, vmax = scale.values
+            values = np.linspace(vmax, vmin, len(levels))
+        elif isinstance(scale.values, dict):
+            # TODO check dict not missing levels
+            values = [scale.values[x] for x in levels]
+        elif isinstance(scale.values, list):
+            # TODO check list length
+            values = scale.values
+        else:
+            # TODO nice error message
+            assert False
+
+        def mapping(x):
+            ixs = x.astype(np.intp)
+            out = np.full(x.shape, np.nan)
+            use = np.isfinite(x)
+            out[use] = np.take(values, ixs[use])
+            return out
+
+        return mapping
+
     def get_mapping(self, scale, data):
+
+        if isinstance(scale, Nominal):
+            return self._get_categorical_mapping(scale, data)
 
         if scale.values is None:
             vmin, vmax = self.default_range
@@ -93,21 +121,39 @@ class SizedProperty(NormableProperty):
         return f
 
 
-class Coordinate(Property):
+class PointSize(SizedProperty):
+    _default_range = 2, 8
 
-    _default_range = None
+
+class LineWidth(SizedProperty):
+    @property
+    def default_range(self) -> tuple[float, float]:
+        base = mpl.rcParams["lines.linewidth"]
+        return base * .5, base * 2
 
 
-class ObjectProperty(Property):
-    # TODO better name this is unclear!
+class EdgeWidth(SizedProperty):
+    @property
+    def default_range(self) -> tuple[float, float]:
+        base = mpl.rcParams["patch.linewidth"]
+        return base * .5, base * 2
+
+
+class ObjectProperty(SemanticProperty):
+    # TODO better name; this is unclear?
+
+    null_value = None
+
+    # TODO add abstraction for logic-free default scale type?
+    def default_scale(self, data):
+        return Nominal()
 
     def infer_scale(self, arg, data):
-
         return Nominal(arg)
 
     def get_mapping(self, scale, data):
 
-        levels = categorical_order(data)
+        levels = categorical_order(data, scale.order)
         n = len(levels)
 
         if isinstance(scale.values, dict):
@@ -121,13 +167,17 @@ class ObjectProperty(Property):
         elif scale.values is None:
             values = self._default_values(n)
         else:
-            # TODO nice error message
+            # TODO add nice error message
             assert False, values
 
         values = self._standardize_values(values)
 
         def mapping(x):
-            return [values[ix] for ix in x.astype(np.intp)]
+            ixs = x.astype(np.intp)
+            return [
+                values[ix] if np.isfinite(x_i) else self.null_value
+                for x_i, ix in zip(x, ixs)
+            ]
 
         return mapping
 
@@ -140,6 +190,10 @@ class ObjectProperty(Property):
 
 
 class Marker(ObjectProperty):
+
+    normed = False
+
+    null_value = mpl.markers.MarkerStyle("")
 
     # TODO should we have named marker "palettes"? (e.g. see d3 options)
 
@@ -198,6 +252,8 @@ class Marker(ObjectProperty):
 
 
 class LineStyle(ObjectProperty):
+
+    null_value = ""
 
     def _default_values(self, n: int):  # -> list[DashPatternWithOffset]:
         """Build an arbitrarily long list of unique dash styles for lines.
@@ -281,7 +337,7 @@ class LineStyle(ObjectProperty):
         else:
             raise ValueError(f'Unrecognized linestyle: {style}')
 
-        # normalize offset to be positive and shorter than the dash cycle
+        # Normalize offset to be positive and shorter than the dash cycle
         if dashes is not None:
             dsum = sum(dashes)
             if dsum:
@@ -290,7 +346,7 @@ class LineStyle(ObjectProperty):
         return offset, dashes
 
 
-class Color(NormableProperty):
+class Color(SemanticProperty):
 
     def infer_scale(self, arg, data) -> ScaleSpec:
 
@@ -328,7 +384,7 @@ class Color(NormableProperty):
 
     def _get_categorical_mapping(self, scale, data):
 
-        levels = categorical_order(data)
+        levels = categorical_order(data, scale.order)
         n = len(levels)
         values = scale.values
 
@@ -350,16 +406,20 @@ class Color(NormableProperty):
             else:
                 colors = color_palette(values, n)
 
-        return colors
+        def mapping(x):
+            ixs = x.astype(np.intp)
+            use = np.isfinite(x)
+            out = np.full((len(x), 3), np.nan)  # TODO rgba?
+            out[use] = np.take(colors, ixs[use], axis=0)
+            return out
+
+        return mapping
 
     def get_mapping(self, scale, data):
 
         # TODO what is best way to do this conditional?
         if isinstance(scale, Nominal):
-            colors = self._get_categorical_mapping(scale, data)
-
-            def mapping(x):
-                return np.take(colors, x.astype(np.intp), axis=0)
+            return self._get_categorical_mapping(scale, data)
 
         elif scale.values is None:
             # TODO data-dependent default type
@@ -385,15 +445,61 @@ class Color(NormableProperty):
         return _mapping
 
 
-class PointSize(SizedProperty):
-    _default_range = 2, 8
+class Alpha(SizedProperty):
+    # TODO Calling Alpha "Sized" seems wrong, but they share the basic mechanics
+    # aside from Alpha having an upper bound.
+    _default_range = .15, .95
+    # TODO validate that output is in [0, 1]
 
 
-class LineWidth(SizedProperty):
-    @property
-    def default_range(self) -> tuple[float, float]:
-        base = mpl.rcParams["lines.linewidth"]
-        return base * .5, base * 2
+class Fill(SemanticProperty):
+
+    normed = False
+
+    # TODO default to Nominal scale always?
+
+    def default_scale(self, data):
+        return Nominal()
+
+    def infer_scale(self, arg, data):
+        return Nominal(arg)
+
+    def _default_values(self, n: int) -> list:
+        """Return a list of n values, alternating True and False."""
+        if n > 2:
+            msg = " ".join([
+                "There are only two possible `fill` values,",
+                # TODO allowing each Property instance to have a variable name
+                # is useful for good error message, but disabling for now
+                # f"There are only two possible {self.variable} values,",
+                "so they will cycle and may produce an uninterpretable plot",
+            ])
+            warnings.warn(msg, UserWarning)
+        return [x for x, _ in zip(itertools.cycle([True, False]), range(n))]
+
+    def get_mapping(self, scale, data):
+
+        order = categorical_order(data, scale.order)
+
+        if isinstance(scale.values, pd.Series):
+            # What's best here? If we simply cast to bool, np.nan -> False, bad!
+            # "boolean"/BooleanDType, is described as experimental/subject to change
+            # But if we don't require any particular behavior, is that ok?
+            # See https://github.com/pandas-dev/pandas/issues/44293
+            values = scale.values.astype("boolean").to_list()
+        elif isinstance(scale.values, list):
+            values = [bool(x) for x in scale.values]
+        elif isinstance(scale.values, dict):
+            values = [bool(scale.values[x]) for x in order]
+        elif scale.values is None:
+            values = self._default_values(len(order))
+        else:
+            raise TypeError(f"Type of `values` ({type(scale.values)}) not understood.")
+
+        def mapping(x):
+            return np.take(values, x.astype(np.intp))
+
+        return mapping
 
 
 # TODO should these be instances or classes?
@@ -403,13 +509,13 @@ PROPERTIES = {
     "color": Color(),
     "fillcolor": Color(),
     "edgecolor": Color(),
-    "alpha": ...,
-    "fillalpha": ...,
-    "edgealpha": ...,
-    "fill": ...,
+    "alpha": Alpha(),
+    "fillalpha": Alpha(),
+    "edgealpha": Alpha(),
+    "fill": Fill(),
     "marker": Marker(),
     "linestyle": LineStyle(),
     "pointsize": PointSize(),
     "linewidth": LineWidth(),
-    "edgewidth": ...
+    "edgewidth": EdgeWidth(),
 }

@@ -5,16 +5,14 @@ from functools import partial
 from typing import ClassVar
 
 import numpy as np
-import pandas as pd
 import matplotlib as mpl
 from matplotlib.axis import Axis
 
 from seaborn._core.rules import categorical_order
-from seaborn._compat import set_scale_obj
 
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
-    from typing import Any, Callable
+    from typing import Any, Callable, Literal
     from matplotlib.scale import ScaleBase
     from pandas import Series
     from seaborn._core.properties import Property
@@ -26,14 +24,19 @@ class Scale:
         self,
         forward_pipe,
         inverse_pipe=None,
+        legend=None,
         scale_type=None,
         matplotlib_scale=None,
     ):
 
         self.forward_pipe = forward_pipe
         self.inverse_pipe = inverse_pipe
+        self.legend = legend
         self.scale_type = scale_type
         self.matplotlib_scale = matplotlib_scale
+
+        # TODO hack, see elsewhere
+        self._legend_values = None
 
         # TODO need to make this work
         self.order = None
@@ -44,7 +47,7 @@ class Scale:
 
     def _apply_pipeline(self, data, pipeline):
 
-        # TODO sometimes we need to handle scalars (e.g. lines)
+        # TODO sometimes we need to handle scalars (e.g. for Line)
         # but what is the best way to do that?
         scalar_data = np.isscalar(data)
         if scalar_data:
@@ -63,7 +66,7 @@ class Scale:
         assert self.inverse_pipe is not None  # TODO raise or no-op?
         return self._apply_pipeline(data, self.inverse_pipe)
 
-    def get_matplotlib_scale(self):
+    def get_matplotlib_scale(self) -> ScaleBase:
         # TODO is this the best approach? Should this be "lazy"?
         return self.matplotlib_scale
 
@@ -98,14 +101,16 @@ class Nominal(ScaleSpec):
             def set_default_locators_and_formatters(self, axis):
                 pass
 
-        mpl_scale = CatScale(data.name)
-        if axis is None:
-            axis = PseudoAxis(mpl_scale)
-
         # TODO flexibility over format() which isn't great for numbers / dates
         stringify = np.vectorize(format)
 
         units_seed = categorical_order(data, self.order)
+
+        mpl_scale = CatScale(data.name)
+        if axis is None:
+            axis = PseudoAxis(mpl_scale)
+            axis.set_view_interval(0, len(units_seed) - 1)
+
         # TODO array cast necessary to handle float/int mixture, which we need
         # to solve in a more systematic way probably
         # (i.e. if we have [1, 2.5], do we want [1.0, 2.5]? Unclear)
@@ -115,7 +120,7 @@ class Nominal(ScaleSpec):
         def convert_units(x):
             # TODO only do this with explicit order?
             # (But also category dtype?)
-            keep = np.in1d(x, units_seed)
+            keep = np.isin(x, units_seed)
             out = np.full(len(x), np.nan)
             out[keep] = axis.convert_units(stringify(x[keep]))
             return out
@@ -128,7 +133,13 @@ class Nominal(ScaleSpec):
 
         inverse_pipe = []
 
-        return Scale(forward_pipe, inverse_pipe, "categorical", mpl_scale)
+        if prop.legend:
+            legend = units_seed, stringify(units_seed)
+        else:
+            legend = None
+
+        scale = Scale(forward_pipe, inverse_pipe, legend, "categorical", mpl_scale)
+        return scale
 
 
 @dataclass
@@ -159,6 +170,7 @@ class Continuous(ScaleSpec):
     scale_type: ClassVar[str] = "numeric"
 
     def tick(self, count=None, *, every=None, at=None, format=None):
+
         # Other ideas ... between?
         # How to minor ticks? I am fine with minor ticks never getting labels
         # so it is just a matter or specifing a) you want them and b) how many?
@@ -167,6 +179,8 @@ class Continuous(ScaleSpec):
         # Do we want to allow tick appearance parameters here?
         # What about direction? Tick on alternate axis?
         # And specific tick label values? Only allow for categorical scales?
+        # Should Continuous().tick(None) mean no tick/legend? If so what should
+        # default value be for count? (I guess Continuous().tick(False) would work?)
         ...
 
     # How to *allow* use of more complex third party objects? It seems shortsighted
@@ -184,10 +198,22 @@ class Continuous(ScaleSpec):
         new = copy(self)
         forward, inverse = self.get_transform()
 
-        new._transform = forward
-
         # matplotlib_scale = mpl.scale.LinearScale(data.name)
         mpl_scale = mpl.scale.FuncScale(data.name, (forward, inverse))
+
+        if prop.normed:
+            if self.norm is None:
+                vmin, vmax = data.min(), data.max()
+            else:
+                vmin, vmax = self.norm
+            a = forward(vmin)
+            b = forward(vmax) - forward(vmin)
+
+            def normalize(x):
+                return (x - a) / b
+
+        else:
+            normalize = vmin = vmax = None
 
         if axis is None:
             axis = PseudoAxis(mpl_scale)
@@ -196,13 +222,23 @@ class Continuous(ScaleSpec):
         forward_pipe = [
             axis.convert_units,
             forward,
-            prop.get_norm(new, data),
+            normalize,
             prop.get_mapping(new, data)
         ]
 
         inverse_pipe = [inverse]
 
-        return Scale(forward_pipe, inverse_pipe, "numeric", mpl_scale)
+        # TODO make legend optional on per-plot basis with ScaleSpec parameter?
+        if prop.legend:
+            axis.set_view_interval(vmin, vmax)
+            locs = axis.major.locator()
+            locs = locs[(vmin <= locs) & (locs <= vmax)]
+            labels = axis.major.formatter.format_ticks(locs)
+            legend = locs, labels
+        else:
+            legend = None
+
+        return Scale(forward_pipe, inverse_pipe, legend, "numeric", mpl_scale)
 
     def get_transform(self):
 

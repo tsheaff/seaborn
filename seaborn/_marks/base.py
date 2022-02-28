@@ -217,13 +217,15 @@ class Mark:
         color = self._resolve(data, f"{prefix}color")
         alpha = self._resolve(data, f"{prefix}alpha")
 
-        if isinstance(color, tuple):
+        if np.ndim(color) < 2:
             if len(color) == 4:
                 return mpl.colors.to_rgba(color)
+            alpha = alpha if np.isfinite(color).all() else np.nan
             return mpl.colors.to_rgba(color, alpha)
         else:
             if color.shape[1] == 4:
                 return mpl.colors.to_rgba_array(color)
+            alpha = np.where(np.isfinite(color).all(axis=1), alpha, np.nan)
             return mpl.colors.to_rgba_array(color, alpha)
 
     def _adjust(
