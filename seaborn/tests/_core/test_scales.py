@@ -217,8 +217,8 @@ class TestNominal:
     @pytest.mark.xfail(reason="Need to sort out float/int order")
     def test_color_numeric_int_float_mix(self):
 
-        z = pd.Series([1, 1.5, 2], name="z")
-        s = Nominal(order=[1, 2]).setup(z, Color())
+        z = pd.Series([1, 2], name="z")
+        s = Nominal(order=[1.0, 2]).setup(z, Color())
         c1, c2 = color_palette(n_colors=2)
         null = (np.nan, np.nan, np.nan)
         assert_array_equal(s(z), [c1, null, c2])

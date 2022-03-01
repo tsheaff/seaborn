@@ -13,8 +13,22 @@ from seaborn.utils import get_color_cycle
 
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
+    from typing import Any, Callable, Tuple, List, Union, Optional
     from pandas import Series
+    from numpy.typing import ArrayLike
     from matplotlib.markers import MarkerStyle
+    from matplotlib.path import Path
+
+    DashPattern = Tuple[float, ...]
+    DashPatternWithOffset = Tuple[float, Optional[DashPattern]]
+    MarkerPattern = Union[
+        float,
+        str,
+        Tuple[int, int, float],
+        List[Tuple[float, float]],
+        Path,
+        MarkerStyle,
+    ]
 
 
 class Property:
@@ -22,9 +36,11 @@ class Property:
     legend = False
     normed = True
 
+    _default_range = tuple[float, float]
+
     @property
     def default_range(self) -> tuple[float, float]:
-        return self._default_range
+        return self._default_range  # type: ignore  # TODO mypy property wtf
 
     def default_scale(self, data: Series) -> ScaleSpec:
         # TODO use Boolean if we add that as a scale
@@ -36,7 +52,7 @@ class Property:
         else:
             return Nominal()
 
-    def infer_scale(self, arg, data):
+    def infer_scale(self, arg: Any, data: Series) -> ScaleSpec:
         # TODO what is best base-level default?
         var_type = variable_type(data)
 
@@ -56,7 +72,10 @@ class Property:
         else:
             return Continuous(arg)
 
-    def get_mapping(self, scale, data):
+    def get_mapping(
+        self, scale: ScaleSpec, data: Series
+    ) -> Callable[[ArrayLike], ArrayLike] | None:
+
         return None
 
 
@@ -142,7 +161,7 @@ class EdgeWidth(SizedProperty):
 class ObjectProperty(SemanticProperty):
     # TODO better name; this is unclear?
 
-    null_value = None
+    null_value: Any = None
 
     # TODO add abstraction for logic-free default scale type?
     def default_scale(self, data):

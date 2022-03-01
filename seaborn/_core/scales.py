@@ -2,7 +2,6 @@ from __future__ import annotations
 from copy import copy
 from dataclasses import dataclass
 from functools import partial
-from typing import ClassVar
 
 import numpy as np
 import matplotlib as mpl
@@ -12,21 +11,29 @@ from seaborn._core.rules import categorical_order
 
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
-    from typing import Any, Callable, Literal
-    from matplotlib.scale import ScaleBase
+    from typing import Any, Callable, Literal, Tuple, List, Optional, Union
+    from matplotlib.scale import ScaleBase as MatplotlibScale
     from pandas import Series
+    from numpy.typing import ArrayLike
     from seaborn._core.properties import Property
+
+    Transforms = Tuple[
+        Callable[[ArrayLike], ArrayLike], Callable[[ArrayLike], ArrayLike]
+    ]
+
+    # TODO standardize String / ArrayLike interface
+    Pipeline = List[Optional[Callable[[Union[Series, ArrayLike]], ArrayLike]]]
 
 
 class Scale:
 
     def __init__(
         self,
-        forward_pipe,
-        inverse_pipe=None,
-        legend=None,
-        scale_type=None,
-        matplotlib_scale=None,
+        forward_pipe: Pipeline,
+        inverse_pipe: Pipeline,
+        legend: tuple[list[Any], list[str]] | None,
+        scale_type: Literal["nominal", "continuous"],
+        matplotlib_scale: MatplotlibScale,
     ):
 
         self.forward_pipe = forward_pipe
@@ -35,17 +42,16 @@ class Scale:
         self.scale_type = scale_type
         self.matplotlib_scale = matplotlib_scale
 
-        # TODO hack, see elsewhere
-        self._legend_values = None
-
         # TODO need to make this work
         self.order = None
 
-    def __call__(self, data):
+    def __call__(self, data: Series) -> ArrayLike:
 
         return self._apply_pipeline(data, self.forward_pipe)
 
-    def _apply_pipeline(self, data, pipeline):
+    def _apply_pipeline(
+        self, data: ArrayLike, pipeline: Pipeline,
+    ) -> ArrayLike:
 
         # TODO sometimes we need to handle scalars (e.g. for Line)
         # but what is the best way to do that?
@@ -66,34 +72,29 @@ class Scale:
         assert self.inverse_pipe is not None  # TODO raise or no-op?
         return self._apply_pipeline(data, self.inverse_pipe)
 
-    def get_matplotlib_scale(self) -> ScaleBase:
-        # TODO is this the best approach? Should this be "lazy"?
-        return self.matplotlib_scale
-
 
 @dataclass
 class ScaleSpec:
 
     ...
-
     # TODO have Scale define width (/height?) (using data?), so e.g. nominal scale sets
     # width=1, continuous scale sets width min(diff(unique(data))), etc.
+
+    def setup(
+        self, data: Series, prop: Property, axis: Axis | None = None,
+    ) -> Scale:
+        ...
 
 
 @dataclass
 class Nominal(ScaleSpec):
-
     # Categorical (convert to strings), un-sortable
+
     values: str | list | dict | None = None
     order: list | None = None
 
-    scale_type: ClassVar[str] = "categorical"  # TODO
-
     def setup(
-        self,
-        data: Series,
-        prop: Property | None = None,
-        axis: Axis | None = None,
+        self, data: Series, prop: Property, axis: Axis | None = None,
     ) -> Scale:
 
         class CatScale(mpl.scale.LinearScale):
@@ -131,43 +132,36 @@ class Nominal(ScaleSpec):
             # TODO how to handle color representation consistency?
         ]
 
-        inverse_pipe = []
+        inverse_pipe: Pipeline = []
 
         if prop.legend:
             legend = units_seed, stringify(units_seed)
         else:
             legend = None
 
-        scale = Scale(forward_pipe, inverse_pipe, legend, "categorical", mpl_scale)
+        scale = Scale(forward_pipe, inverse_pipe, legend, "nominal", mpl_scale)
         return scale
 
 
 @dataclass
 class Ordinal(ScaleSpec):
-    # Categorical (convert to strings), sortable
+    # Categorical (convert to strings), sortable, can skip ticklabels
     ...
 
 
 @dataclass
 class Discrete(ScaleSpec):
     # Numeric, integral, can skip ticks/ticklabels
-    palette: str | list | dict | None = None
-    order: list | None = None
-    # TODO other params
+    ...
 
 
 @dataclass
 class Continuous(ScaleSpec):
 
-    values: tuple[float, float] | None = None
+    values: tuple | str | None = None  # TODO stricter tuple typing?
     norm: tuple[float | None, float | None] | None = None
-    transform: str | tuple[Callable, Callable] | None = None
+    transform: str | Transforms | None = None
     outside: Literal["keep", "drop", "clip"] = "keep"
-    # TODO other params
-
-    # TODO needed for Mark._infer_orient
-    # But maybe that should do an isinstance check?
-    scale_type: ClassVar[str] = "numeric"
 
     def tick(self, count=None, *, every=None, at=None, format=None):
 
@@ -189,10 +183,7 @@ class Continuous(ScaleSpec):
     # def using(self, scale: mpl.scale.ScaleBase) ?
 
     def setup(
-        self,
-        data: Series,
-        prop: Property | None = None,
-        axis: Axis | None = None,
+        self, data: Series, prop: Property, axis: Axis | None = None,
     ) -> Scale:
 
         new = copy(self)
@@ -201,6 +192,7 @@ class Continuous(ScaleSpec):
         # matplotlib_scale = mpl.scale.LinearScale(data.name)
         mpl_scale = mpl.scale.FuncScale(data.name, (forward, inverse))
 
+        normalize: Optional[Callable[[ArrayLike], ArrayLike]]
         if prop.normed:
             if self.norm is None:
                 vmin, vmax = data.min(), data.max()
@@ -238,7 +230,7 @@ class Continuous(ScaleSpec):
         else:
             legend = None
 
-        return Scale(forward_pipe, inverse_pipe, legend, "numeric", mpl_scale)
+        return Scale(forward_pipe, inverse_pipe, legend, "continuous", mpl_scale)
 
     def get_transform(self):
 
@@ -277,7 +269,6 @@ class Continuous(ScaleSpec):
 
 # ----------------------------------------------------------------------------------- #
 
-# TODO best way to handle datetime(s)?
 
 class Temporal(ScaleSpec):
     ...
@@ -401,18 +392,10 @@ class PseudoAxis:
         return self.converter.convert(x, self.units, self)
 
 
-# -
+# ------------------------------------------------------------------------------------
 
 
-def infer_scale_type(var: str, data: Series, arg: Any) -> Scale:
-
-    if arg is None:
-        # Note that we also want None in Plot.scale to mean identity
-        # Perhaps have a separate function for inferring just from data?
-        ...
-
-
-def _make_identity_transforms():
+def _make_identity_transforms() -> Transforms:
 
     def identity(x):
         return x
@@ -420,7 +403,7 @@ def _make_identity_transforms():
     return identity, identity
 
 
-def _make_logit_transforms(base=None):
+def _make_logit_transforms(base: float = None) -> Transforms:
 
     log, exp = _make_log_transforms(base)
 
@@ -435,7 +418,7 @@ def _make_logit_transforms(base=None):
     return logit, expit
 
 
-def _make_log_transforms(base=None):
+def _make_log_transforms(base: float | None = None) -> Transforms:
 
     if base is None:
         fs = np.log, np.exp
@@ -459,7 +442,7 @@ def _make_log_transforms(base=None):
     return log, exp
 
 
-def _make_symlog_transforms(c=1, base=10):
+def _make_symlog_transforms(c: float = 1, base: float = 10) -> Transforms:
 
     # From https://iopscience.iop.org/article/10.1088/0957-0233/24/2/027001
 
@@ -479,7 +462,7 @@ def _make_symlog_transforms(c=1, base=10):
     return symlog, symexp
 
 
-def _make_sqrt_transforms():
+def _make_sqrt_transforms() -> Transforms:
 
     def sqrt(x):
         return np.sign(x) * np.sqrt(np.abs(x))
@@ -490,7 +473,7 @@ def _make_sqrt_transforms():
     return sqrt, square
 
 
-def _make_power_transforms(exp):
+def _make_power_transforms(exp: float) -> Transforms:
 
     def forward(x):
         return np.sign(x) * np.power(np.abs(x), exp)

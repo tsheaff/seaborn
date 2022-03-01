@@ -240,6 +240,9 @@ class Mark:
         # TODO The original version of this (in seaborn._oldcore) did more checking.
         # Paring that down here for the prototype to see what restrictions make sense.
 
+        # TODO rethink this to map from scale type to "DV priority" and use that?
+        # e.g. Nominal > Discrete > Continuous
+
         x_type = None if "x" not in scales else scales["x"].scale_type
         y_type = None if "y" not in scales else scales["y"].scale_type
 
@@ -249,16 +252,16 @@ class Mark:
         elif y_type is None:
             return "x"
 
-        elif x_type != "categorical" and y_type == "categorical":
+        elif x_type != "nominal" and y_type == "continuous":
             return "y"
 
-        elif x_type != "numeric" and y_type == "numeric":
+        elif x_type != "continuous" and y_type == "continuous":
 
             # TODO should we try to orient based on number of unique values?
 
             return "x"
 
-        elif x_type == "numeric" and y_type != "numeric":
+        elif x_type == "continuous" and y_type != "continuous":
             return "y"
 
         else:

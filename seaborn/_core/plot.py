@@ -26,7 +26,6 @@ from seaborn._core.mappings import (
     AlphaSemantic,
     PointSizeSemantic,
     WidthSemantic,
-    IdentityMapping,
 )
 from seaborn._core.scales_take1 import (
     Scale,
@@ -89,7 +88,8 @@ class Plot:
     _data: PlotData
     _layers: list[dict]
     _semantics: dict[str, Semantic]
-    _scales: dict[str, Scale]
+    # TODO keeping Scale as possible value for mypy until we remove that code
+    _scales: dict[str, ScaleSpec | Scale]
 
     # TODO use TypedDict here
     _subplotspec: dict[str, Any]
@@ -1024,7 +1024,7 @@ class Plotter:
                 # Currently it is disabling the formatters that we set in scale.setup
                 # The other option (using currently) is to define custom matplotlib
                 # scales that don't change other axis properties
-                set_scale_obj(subplot["ax"], axis, axis_scale.get_matplotlib_scale())
+                set_scale_obj(subplot["ax"], axis, axis_scale.matplotlib_scale)
 
     def _plot_layer(
         self,
@@ -1159,7 +1159,8 @@ class Plotter:
         df: DataFrame,
         pair_variables: dict,
     ) -> Generator[
-        tuple[list[dict], DataFrame, dict[str, Scale]], None, None
+        # TODO type scales dict more strictly when we get rid of original Scale
+        tuple[list[dict], DataFrame, dict], None, None
     ]:
         # TODO retype return with SubplotSpec or similar
 

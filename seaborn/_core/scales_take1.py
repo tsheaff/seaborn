@@ -44,9 +44,6 @@ with attributes copied to the new object.
 """
 from __future__ import annotations
 from copy import copy
-from functools import partial
-from dataclasses import dataclass
-from typing import ClassVar
 
 import numpy as np
 import pandas as pd
@@ -60,12 +57,9 @@ from seaborn._compat import norm_from_scale
 
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
-    from typing import Any, Callable, Literal
+    from typing import Any, Callable
     from pandas import Series
     from matplotlib.scale import ScaleBase
-    from seaborn._core.mappings import Semantic
-
-    # TODO Self TypeVar for Scale to use in setup?
 
 
 class Scale:
@@ -407,8 +401,7 @@ def get_default_scale(data: Series) -> Scale:
 
     var_type = variable_type(data)
     if var_type == "numeric":
-        # return NumericScale(scale_obj, norm=mpl.colors.Normalize())
-        return Continuous()
+        return NumericScale(scale_obj, norm=mpl.colors.Normalize())
     elif var_type == "categorical":
         return CategoricalScale(scale_obj, order=None, formatter=format)
     elif var_type == "datetime":
