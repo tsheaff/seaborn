@@ -135,7 +135,7 @@ class Nominal(ScaleSpec):
         inverse_pipe: Pipeline = []
 
         if prop.legend:
-            legend = units_seed, stringify(units_seed)
+            legend = units_seed, list(stringify(units_seed))
         else:
             legend = None
 
@@ -226,7 +226,7 @@ class Continuous(ScaleSpec):
             locs = axis.major.locator()
             locs = locs[(vmin <= locs) & (locs <= vmax)]
             labels = axis.major.formatter.format_ticks(locs)
-            legend = locs, labels
+            legend = list(locs), list(labels)
         else:
             legend = None
 

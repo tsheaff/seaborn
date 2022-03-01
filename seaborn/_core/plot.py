@@ -27,8 +27,8 @@ from seaborn._core.mappings import (
     PointSizeSemantic,
     WidthSemantic,
 )
+from seaborn._core.scales import Scale
 from seaborn._core.scales_take1 import (
-    Scale,
     NumericScale,
     CategoricalScale,
     DateTimeScale,
@@ -953,8 +953,12 @@ class Plotter:
                 if isinstance(arg, ScaleSpec):
                     scale = arg
                 elif arg is None:
-                    # TODO this means identity scale
-                    assert None, "needs implementation"
+                    # TODO what is the cleanest way to implement identity scale?
+                    # We don't really need a ScaleSpec, and Identity() will be
+                    # overloaded anyway (but maybe a general Identity object
+                    # that can be used as Scale/Mark/Stat/Move?)
+                    self._scales[var] = Scale([], [], None, "identity", None)
+                    continue
                 else:
                     scale = prop.infer_scale(arg, var_values)
             else:

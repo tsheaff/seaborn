@@ -45,7 +45,7 @@ class MockMark(Mark):
         self.passed_keys = []
         self.passed_data = []
         self.passed_axes = []
-        self.passed_mappings = []
+        self.passed_scales = []
         self.n_splits = 0
 
     def _plot_split(self, keys, data, ax, kws):
@@ -55,8 +55,7 @@ class MockMark(Mark):
         self.passed_data.append(data)
         self.passed_axes.append(ax)
 
-        # TODO update the test that uses this
-        self.passed_mappings.append(self.mappings)
+        self.passed_scales.append(self.scales)
 
     def _legend_artist(self, variables, value):
 
@@ -472,8 +471,8 @@ class TestAxisScaling:
         x = y = [1, 2, 3, 4, 5]
         lw = pd.Series([.5, .1, .1, .9, 3])
         Plot(x=x, y=y, linewidth=lw).scale_identity("linewidth").add(m).plot()
-        for mapping in m.passed_mappings:
-            assert_vector_equal(mapping["linewidth"](lw), lw)
+        for scales in m.passed_scales:
+            assert_vector_equal(scales["linewidth"](lw), lw)
 
     def test_identity_mapping_color_strings(self):
 
@@ -739,7 +738,7 @@ class TestPlotting:
         m = MockMark()
         Plot(
             long_df, x="z", y="z"
-        ).scale_numeric("x", "log").add(m, move=MockMove()).plot()
+        ).scale(x="log").add(m, move=MockMove()).plot()
         assert_vector_equal(m.passed_data[0]["x"], long_df["z"] / 10)
 
     def test_methods_clone(self, long_df):
@@ -1606,7 +1605,7 @@ class TestLegend:
     def test_identity_scale_ignored(self, xy):
 
         s = pd.Series(["r", "g", "b", "g"])
-        p = Plot(**xy).add(MockMark(), color=s).scale_identity("color").plot()
+        p = Plot(**xy).add(MockMark(), color=s).scale(color=None).plot()
         assert not p._legend_contents
 
     # TODO test actually legend content? But wait until we decide

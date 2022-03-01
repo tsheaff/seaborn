@@ -65,7 +65,6 @@ if TYPE_CHECKING:
         List[Tuple[float, float]],
         Path,
         MarkerStyle,
-
     ]
 
 
