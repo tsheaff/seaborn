@@ -8,6 +8,7 @@ import matplotlib as mpl
 
 from seaborn._core.scales import ScaleSpec, Nominal, Continuous
 from seaborn._core.rules import categorical_order, variable_type
+from seaborn._compat import MarkerStyle
 from seaborn.palettes import QUAL_PALETTES, color_palette, blend_palette
 from seaborn.utils import get_color_cycle
 
@@ -16,7 +17,6 @@ if TYPE_CHECKING:
     from typing import Any, Callable, Tuple, List, Union, Optional
     from pandas import Series
     from numpy.typing import ArrayLike
-    from matplotlib.markers import MarkerStyle
     from matplotlib.path import Path
 
     DashPattern = Tuple[float, ...]
@@ -211,7 +211,7 @@ class Marker(ObjectProperty):
 
     normed = False
 
-    null_value = mpl.markers.MarkerStyle("")
+    null_value = MarkerStyle("")
 
     # TODO should we have named marker "palettes"? (e.g. see d3 options)
 
@@ -222,7 +222,7 @@ class Marker(ObjectProperty):
 
     def _standardize_values(self, values):
 
-        return [mpl.markers.MarkerStyle(x) for x in values]
+        return [MarkerStyle(x) for x in values]
 
     def _default_values(self, n: int) -> list[MarkerStyle]:
         """Build an arbitrarily long list of unique marker styles for points.
@@ -264,7 +264,7 @@ class Marker(ObjectProperty):
             ])
             s += 1
 
-        markers = [mpl.markers.MarkerStyle(m) for m in markers[:n]]
+        markers = [MarkerStyle(m) for m in markers[:n]]
 
         return markers
 
