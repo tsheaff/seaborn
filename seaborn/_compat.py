@@ -112,6 +112,11 @@ def set_scale_obj(ax, axis, scale):
         # to matplotlib in version 3.4.0: GH: matplotlib/matplotlib/pull/19089
         # Workaround: use the scale name, which is restrictive only if the user
         # wants to define a custom scale; they'll need to update the registry too.
-        ax.set(**{f"{axis}scale": scale.name})
+        method = getattr(ax, f"set_{axis}scale")
+        kws = {}
+        if scale.name == "function":
+            trans = scale.get_transform()
+            kws["functions"] = (trans._forward, trans._inverse)
+        method(scale.name, **kws)
     else:
         ax.set(**{f"{axis}scale": scale})
