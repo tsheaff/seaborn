@@ -99,6 +99,8 @@ class Nominal(ScaleSpec):
 
         class CatScale(mpl.scale.LinearScale):
             # TODO turn this into a real thing I guess
+            name = None  # To work around mpl<3.4 compat issues
+
             def set_default_locators_and_formatters(self, axis):
                 pass
 
