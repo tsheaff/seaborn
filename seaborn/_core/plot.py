@@ -592,7 +592,7 @@ class Plot:
             scale = scale_factory(scale, var, **kwargs)
 
         new = self._clone()
-        new._scales[var] = NumericScale(scale, norm)
+        new._scales[var] = NumericScale(scale, norm)  # type: ignore
 
         return new
 
@@ -628,7 +628,7 @@ class Plot:
         scale = mpl.scale.LinearScale(var)
 
         new = self._clone()
-        new._scales[var] = CategoricalScale(scale, order, formatter)
+        new._scales[var] = CategoricalScale(scale, order, formatter)  # type: ignore
         return new
 
     def scale_datetime(
@@ -640,7 +640,7 @@ class Plot:
         scale = mpl.scale.LinearScale(var)
 
         new = self._clone()
-        new._scales[var] = DateTimeScale(scale, norm)
+        new._scales[var] = DateTimeScale(scale, norm)  # type: ignore
 
         # TODO I think rather than dealing with the question of "should we follow
         # pandas or matplotlib conventions with float -> date conversion, we should
@@ -662,7 +662,7 @@ class Plot:
     def scale_identity(self, var: str) -> Plot:
 
         new = self._clone()
-        new._scales[var] = IdentityScale()
+        new._scales[var] = IdentityScale()  # type: ignore
         return new
 
     def configure(
@@ -926,12 +926,12 @@ class Plotter:
         for var in variables:
 
             # Get the data all the distinct appearances of this variable.
-            var_data = pd.concat([
+            var_values = pd.concat([
                 df.get(var),
                 # Only use variables that are *added* at the layer-level
                 *(x["data"].frame.get(var)
                   for x in self._layers if var in x["variables"])
-            ], axis=1)
+            ], axis=0, join="inner", ignore_index=True).rename(var)
 
             # Determine whether this is an coordinate variable
             # (i.e., x/y, paired x/y, or derivative such as xmax)
@@ -941,8 +941,6 @@ class Plotter:
             else:
                 var = m.group("prefix")
                 axis = m.group("axis")
-
-            var_values = var_data.stack().rename(var)
 
             # TODO what is the best way to allow undefined properties?
             # i.e. it is useful for extensions and non-graphical variables.
@@ -1020,7 +1018,7 @@ class Plotter:
                         subplot_data = df
 
                     # Same operation as above, but using the reduced dataset
-                    subplot_values = var_data.loc[subplot_data.index].stack()
+                    subplot_values = var_values.loc[subplot_data.index]
                     axis_scale = scale.setup(subplot_values, prop, axis=axis_obj)
                     subplot[f"{axis}scale"] = axis_scale
 
