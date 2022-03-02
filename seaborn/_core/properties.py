@@ -36,11 +36,11 @@ class Property:
     legend = False
     normed = True
 
-    _default_range = tuple[float, float]
+    _default_range: tuple[float, float]
 
     @property
     def default_range(self) -> tuple[float, float]:
-        return self._default_range  # type: ignore  # TODO mypy property wtf
+        return self._default_range
 
     def default_scale(self, data: Series) -> ScaleSpec:
         # TODO use Boolean if we add that as a scale
@@ -83,7 +83,6 @@ class Coordinate(Property):
 
     legend = False
     normed = False
-    _default_range = None
 
 
 class SemanticProperty(Property):
