@@ -38,6 +38,9 @@ class Property:
 
     _default_range: tuple[float, float]
 
+    def __init__(self, variable: str = ""):
+        self.variable = variable
+
     @property
     def default_range(self) -> tuple[float, float]:
         return self._default_range
@@ -79,6 +82,28 @@ class Property:
 
         return None
 
+    def _check_dict_not_missing_levels(self, levels: list, values: dict) -> None:
+        """Input check when values are provided as a dictionary."""
+        missing = set(levels) - set(values)
+        if missing:
+            formatted = ", ".join(map(repr, sorted(missing, key=str)))
+            err = f"No entry in {self.variable} dictionary for {formatted}"
+            raise ValueError(err)
+
+    def _ensure_list_not_too_short(self, levels: list, values: list) -> list:
+        """Input check when values are provided as a list."""
+        if len(levels) > len(values):
+            msg = " ".join([
+                f"The {self.variable} list has fewer values ({len(values)})",
+                f"than needed ({len(levels)}) and will cycle, which may",
+                "produce an uninterpretable plot."
+            ])
+            warnings.warn(msg, UserWarning)
+
+            values = [x for _, x in zip(levels, itertools.cycle(values))]
+
+        return values
+
 
 class Coordinate(Property):
 
@@ -116,7 +141,7 @@ class SizedProperty(SemanticProperty):
             assert False
 
         def mapping(x):
-            ixs = x.astype(np.intp)
+            ixs = np.asarray(x, np.intp)
             out = np.full(x.shape, np.nan)
             use = np.isfinite(x)
             out[use] = np.take(values, ixs[use])
@@ -176,11 +201,11 @@ class ObjectProperty(SemanticProperty):
         n = len(levels)
 
         if isinstance(scale.values, dict):
-            # self._check_dict_not_missing_levels(levels, values)
+            self._check_dict_not_missing_levels(levels, scale.values)
             # TODO where to ensure that dict values have consistent representation?
             values = [scale.values[x] for x in levels]
         elif isinstance(scale.values, list):
-            # colors = self._ensure_list_not_too_short(levels, values)
+            values = self._ensure_list_not_too_short(levels, scale.values)
             # TODO check not too long also?
             values = scale.values
         elif scale.values is None:
@@ -192,7 +217,7 @@ class ObjectProperty(SemanticProperty):
         values = self._standardize_values(values)
 
         def mapping(x):
-            ixs = x.astype(np.intp)
+            ixs = np.asarray(x, np.intp)
             return [
                 values[ix] if np.isfinite(x_i) else self.null_value
                 for x_i, ix in zip(x, ixs)
@@ -408,7 +433,7 @@ class Color(SemanticProperty):
         values = scale.values
 
         if isinstance(values, dict):
-            # self._check_dict_not_missing_levels(levels, values)
+            self._check_dict_not_missing_levels(levels, values)
             # TODO where to ensure that dict values have consistent representation?
             colors = [values[x] for x in levels]
         else:
@@ -419,16 +444,15 @@ class Color(SemanticProperty):
                 else:
                     colors = color_palette("husl", n)
             elif isinstance(values, list):
-                # colors = self._ensure_list_not_too_short(levels, values)
-                # TODO check not too long also?
+                values = self._ensure_list_not_too_short(levels, values)
                 colors = color_palette(values)
             else:
                 colors = color_palette(values, n)
 
         def mapping(x):
-            ixs = x.astype(np.intp)
+            ixs = np.asarray(x, np.intp)
             use = np.isfinite(x)
-            out = np.full((len(x), 3), np.nan)  # TODO rgba?
+            out = np.full((len(ixs), 3), np.nan)  # TODO rgba?
             out[use] = np.take(colors, ixs[use], axis=0)
             return out
 
@@ -516,25 +540,24 @@ class Fill(SemanticProperty):
             raise TypeError(f"Type of `values` ({type(scale.values)}) not understood.")
 
         def mapping(x):
-            return np.take(values, x.astype(np.intp))
+            return np.take(values, np.asarray(x, np.intp))
 
         return mapping
 
 
-# TODO should these be instances or classes?
 PROPERTIES = {
-    "x": Coordinate(),
-    "y": Coordinate(),
-    "color": Color(),
-    "fillcolor": Color(),
-    "edgecolor": Color(),
-    "alpha": Alpha(),
-    "fillalpha": Alpha(),
-    "edgealpha": Alpha(),
-    "fill": Fill(),
-    "marker": Marker(),
-    "linestyle": LineStyle(),
-    "pointsize": PointSize(),
-    "linewidth": LineWidth(),
-    "edgewidth": EdgeWidth(),
+    "x": Coordinate("x"),
+    "y": Coordinate("y"),
+    "color": Color("color"),
+    "fillcolor": Color("fillcolor"),
+    "edgecolor": Color("edgecolor"),
+    "alpha": Alpha("alpha"),
+    "fillalpha": Alpha("fillalpha"),
+    "edgealpha": Alpha("edgealpha"),
+    "fill": Fill("fill"),
+    "marker": Marker("marker"),
+    "linestyle": LineStyle("linestyle"),
+    "pointsize": PointSize("pointsize"),
+    "linewidth": LineWidth("linewidth"),
+    "edgewidth": EdgeWidth("edgewidth"),
 }

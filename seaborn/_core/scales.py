@@ -112,6 +112,10 @@ class Nominal(ScaleSpec):
         mpl_scale = CatScale(data.name)
         if axis is None:
             axis = PseudoAxis(mpl_scale)
+
+            # TODO Currently just used in non-Coordinate contexts, but should
+            # we use this to (A) set the padding we want for categorial plots
+            # and (B) allow the values parameter for a Coordinate to set xlim/ylim
             axis.set_view_interval(0, len(units_seed) - 1)
 
         # TODO array cast necessary to handle float/int mixture, which we need
@@ -165,9 +169,8 @@ class Continuous(ScaleSpec):
     transform: str | Transforms | None = None
     outside: Literal["keep", "drop", "clip"] = "keep"
 
-    def tick(self, count=None, *, every=None, at=None, format=None):
+    def tick(self, count=None, *, every=None, at=None, between=None, format=None):
 
-        # Other ideas ... between?
         # How to minor ticks? I am fine with minor ticks never getting labels
         # so it is just a matter or specifing a) you want them and b) how many?
         # Unlike with ticks, knowing how many minor ticks in each interval suffices.
