@@ -90,7 +90,7 @@ class ScaleSpec:
 class Nominal(ScaleSpec):
     # Categorical (convert to strings), un-sortable
 
-    values: str | list | dict | None = None
+    values: str | list | dict | tuple | None = None
     order: list | None = None
 
     def setup(

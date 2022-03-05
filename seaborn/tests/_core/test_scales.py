@@ -78,16 +78,22 @@ class TestContinuous:
         s = Continuous().setup(x, Color())
         assert_array_equal(s(x), cmap([0, .25, 1])[:, :3])  # FIXME RGBA
 
-    def test_color_with_named_range(self, x):
+    def test_color_named_values(self, x):
 
         cmap = color_palette("viridis", as_cmap=True)
         s = Continuous("viridis").setup(x, Color())
         assert_array_equal(s(x), cmap([0, .25, 1])[:, :3])  # FIXME RGBA
 
-    def test_color_with_tuple_range(self, x):
+    def test_color_tuple_values(self, x):
 
         cmap = color_palette("blend:b,g", as_cmap=True)
         s = Continuous(("b", "g")).setup(x, Color())
+        assert_array_equal(s(x), cmap([0, .25, 1])[:, :3])  # FIXME RGBA
+
+    def test_color_callable_values(self, x):
+
+        cmap = color_palette("light:r", as_cmap=True)
+        s = Continuous(cmap).setup(x, Color())
         assert_array_equal(s(x), cmap([0, .25, 1])[:, :3])  # FIXME RGBA
 
     def test_color_with_norm(self, x):
@@ -158,6 +164,16 @@ class TestNominal:
         f = ax.xaxis.get_major_formatter()
         assert f.format_ticks([0, 1, 2]) == [*order, ""]
 
+    def test_coordinate_axis_with_category_dtype(self, x):
+
+        order = ["b", "a", "d", "c"]
+        x = x.astype(pd.CategoricalDtype(order))
+        ax = mpl.figure.Figure().subplots()
+        s = Nominal().setup(x, Coordinate(), ax.xaxis)
+        assert_array_equal(s(x), np.array([1, 3, 0, 3], float))
+        f = ax.xaxis.get_major_formatter()
+        assert f.format_ticks([0, 1, 2, 3]) == order
+
     def test_coordinate_numeric_data(self, y):
 
         ax = mpl.figure.Figure().subplots()
@@ -222,6 +238,29 @@ class TestNominal:
         c1, c2 = color_palette(n_colors=2)
         null = (np.nan, np.nan, np.nan)
         assert_array_equal(s(z), [c1, null, c2])
+
+    @pytest.mark.xfail(reason="Need to (re)implement alpha pass-through")
+    def test_color_alpha_in_palette(self, x):
+
+        cs = [(.2, .2, .3, .5), (.1, .2, .3, 1), (.5, .6, .2, 0)]
+        s = Nominal(cs).setup(x, Color())
+        assert_array_equal(s(x), [cs[1], cs[0], cs[2], cs[0]])
+
+    @pytest.mark.xfail(reason="Need to (re)implement alpha pass-through")
+    def test_color_mixture_of_alpha_nonalpha(self):
+
+        x = pd.Series(["a", "b"])
+        pal = [(1, 0, .5), (.5, .5, .5, .5)]
+        err = "Color scales cannot mix colors defined with and without alpha channels."
+        with pytest.raises(ValueError, match=err):
+            Nominal(pal).setup(x, Color())
+
+    def test_color_unknown_palette(self, x):
+
+        pal = "not_a_palette"
+        err = f"{pal} is not a valid palette name"
+        with pytest.raises(ValueError, match=err):
+            Nominal(pal).setup(x, Color())
 
     def test_object_defaults(self, x):
 

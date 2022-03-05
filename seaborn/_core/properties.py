@@ -38,7 +38,9 @@ class Property:
 
     _default_range: tuple[float, float]
 
-    def __init__(self, variable: str = ""):
+    def __init__(self, variable: str | None = None):
+        if not variable:
+            variable = self.__class__.__name__.lower()
         self.variable = variable
 
     @property
@@ -46,6 +48,9 @@ class Property:
         return self._default_range
 
     def default_scale(self, data: Series) -> ScaleSpec:
+        # TODO do we need a separate default_scale method or can this be handled in
+        # infer_scale? The concern is that you'd want to pass arg=None, but in the
+        # Plot.scale interface var=None means identity scale, so that's confusing.
         # TODO use Boolean if we add that as a scale
         # TODO how will this handle data with units that can be treated as numeric
         # if passed through a registered matplotlib converter?
@@ -90,17 +95,27 @@ class Property:
             err = f"No entry in {self.variable} dictionary for {formatted}"
             raise ValueError(err)
 
-    def _ensure_list_not_too_short(self, levels: list, values: list) -> list:
+    def _check_list_length(self, levels: list, values: list) -> list:
         """Input check when values are provided as a list."""
+        message = ""
         if len(levels) > len(values):
-            msg = " ".join([
-                f"The {self.variable} list has fewer values ({len(values)})",
+            message = " ".join([
+                f"\nThe {self.variable} list has fewer values ({len(values)})",
                 f"than needed ({len(levels)}) and will cycle, which may",
                 "produce an uninterpretable plot."
             ])
-            warnings.warn(msg, UserWarning)
-
             values = [x for _, x in zip(levels, itertools.cycle(values))]
+
+        elif len(values) > len(levels):
+            message = " ".join([
+                f"The {self.variable} list has more values ({len(values)})",
+                f"than needed ({len(levels)}), which may not be intended.",
+            ])
+            values = values[:len(levels)]
+
+        # TODO look into custom PlotSpecWarning with better formatting
+        if message:
+            warnings.warn(message, UserWarning)
 
         return values
 
@@ -165,24 +180,6 @@ class SizedProperty(SemanticProperty):
         return f
 
 
-class PointSize(SizedProperty):
-    _default_range = 2, 8
-
-
-class LineWidth(SizedProperty):
-    @property
-    def default_range(self) -> tuple[float, float]:
-        base = mpl.rcParams["lines.linewidth"]
-        return base * .5, base * 2
-
-
-class EdgeWidth(SizedProperty):
-    @property
-    def default_range(self) -> tuple[float, float]:
-        base = mpl.rcParams["patch.linewidth"]
-        return base * .5, base * 2
-
-
 class ObjectProperty(SemanticProperty):
     # TODO better name; this is unclear?
 
@@ -202,12 +199,9 @@ class ObjectProperty(SemanticProperty):
 
         if isinstance(scale.values, dict):
             self._check_dict_not_missing_levels(levels, scale.values)
-            # TODO where to ensure that dict values have consistent representation?
             values = [scale.values[x] for x in levels]
         elif isinstance(scale.values, list):
-            values = self._ensure_list_not_too_short(levels, scale.values)
-            # TODO check not too long also?
-            values = scale.values
+            values = self._check_list_length(levels, scale.values)
         elif scale.values is None:
             values = self._default_values(n)
         else:
@@ -231,6 +225,24 @@ class ObjectProperty(SemanticProperty):
     def _standardize_values(self, values):
 
         return values
+
+
+class PointSize(SizedProperty):
+    _default_range = 2, 8
+
+
+class LineWidth(SizedProperty):
+    @property
+    def default_range(self) -> tuple[float, float]:
+        base = mpl.rcParams["lines.linewidth"]
+        return base * .5, base * 2
+
+
+class EdgeWidth(SizedProperty):
+    @property
+    def default_range(self) -> tuple[float, float]:
+        base = mpl.rcParams["patch.linewidth"]
+        return base * .5, base * 2
 
 
 class Marker(ObjectProperty):
@@ -394,11 +406,21 @@ class Color(SemanticProperty):
 
     def infer_scale(self, arg, data) -> ScaleSpec:
 
+        # TODO when inferring Continuous without data, verify type
+
+        # TODO need to rethink the variable type system...
+        var_type = variable_type(data, boolean_type="categorical")
+
         # TODO do color standardization on dict / list values?
         if isinstance(arg, (dict, list)):
             return Nominal(arg)
 
         if isinstance(arg, tuple):
+            if var_type == "categorical":
+                # TODO It seems reasonable to allow a gradient mapping for nominal
+                # scale but it also feels "technically" wrong. Should this infer
+                # Ordinal with categorical data and, if so, verify orderedness?
+                return Nominal(arg)
             return Continuous(arg)
 
         if callable(arg):
@@ -410,12 +432,10 @@ class Color(SemanticProperty):
         # - Temporal? (i.e. datetime)
         # - Boolean?
 
-        assert isinstance(arg, str)  # TODO sanity check
+        assert isinstance(arg, str)  # TODO sanity check for dev
 
-        var_type = (
-            "categorical" if arg in QUAL_PALETTES
-            else variable_type(data, boolean_type="categorical")
-        )
+        if arg in QUAL_PALETTES:
+            return Nominal(arg)
 
         if var_type == "categorical":
             return Nominal(arg)
@@ -436,6 +456,8 @@ class Color(SemanticProperty):
             self._check_dict_not_missing_levels(levels, values)
             # TODO where to ensure that dict values have consistent representation?
             colors = [values[x] for x in levels]
+        elif isinstance(values, tuple):
+            colors = blend_palette(values, n)
         else:
             if values is None:
                 if n <= len(get_color_cycle()):
@@ -444,7 +466,7 @@ class Color(SemanticProperty):
                 else:
                     colors = color_palette("husl", n)
             elif isinstance(values, list):
-                values = self._ensure_list_not_too_short(levels, values)
+                values = self._check_list_length(levels, scale.values)
                 colors = color_palette(values)
             else:
                 colors = color_palette(values, n)
@@ -474,6 +496,10 @@ class Color(SemanticProperty):
             # TODO data-dependent return type?
             # TODO for matplotlib colormaps this will clip, which is different behavior
             mapping = color_palette(scale.values, as_cmap=True)
+        elif callable(scale.values):
+            mapping = scale.values
+
+        # TODO is callable (i.e. colormap?)
 
         # TODO just during dev
         else:
@@ -546,18 +572,18 @@ class Fill(SemanticProperty):
 
 
 PROPERTIES = {
-    "x": Coordinate("x"),
-    "y": Coordinate("y"),
-    "color": Color("color"),
+    "x": Coordinate(),
+    "y": Coordinate(),
+    "color": Color(),
     "fillcolor": Color("fillcolor"),
     "edgecolor": Color("edgecolor"),
-    "alpha": Alpha("alpha"),
+    "alpha": Alpha(),
     "fillalpha": Alpha("fillalpha"),
     "edgealpha": Alpha("edgealpha"),
-    "fill": Fill("fill"),
-    "marker": Marker("marker"),
-    "linestyle": LineStyle("linestyle"),
-    "pointsize": PointSize("pointsize"),
-    "linewidth": LineWidth("linewidth"),
-    "edgewidth": EdgeWidth("edgewidth"),
+    "fill": Fill(),
+    "marker": Marker(),
+    "linestyle": LineStyle(),
+    "pointsize": PointSize(),
+    "linewidth": LineWidth(),
+    "edgewidth": EdgeWidth(),
 }
