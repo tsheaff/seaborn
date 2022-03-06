@@ -87,7 +87,7 @@ class Property:
 
         return None
 
-    def _check_dict_not_missing_levels(self, levels: list, values: dict) -> None:
+    def _check_dict_entries(self, levels: list, values: dict) -> None:
         """Input check when values are provided as a dictionary."""
         missing = set(levels) - set(values)
         if missing:
@@ -135,9 +135,23 @@ class SizedProperty(SemanticProperty):
     # TODO pass default range to constructor and avoid defining a bunch of subclasses?
     _default_range: tuple[float, float] = (0, 1)
 
+    def infer_scale(self, arg, data):
+
+        # TODO infer continuous based on log/sqrt etc?
+
+        if isinstance(arg, (list, dict)):
+            return Nominal(arg)
+        elif variable_type(data) == "categorical":
+            return Nominal(arg)
+        # TODO other variable types
+        else:
+            return Continuous(arg)
+
     def _get_categorical_mapping(self, scale, data):
 
         levels = categorical_order(data, scale.order)
+
+        # TODO how to allow e.g. PointSize to sqrt transform here?
 
         if scale.values is None:
             vmin, vmax = self.default_range
@@ -146,11 +160,10 @@ class SizedProperty(SemanticProperty):
             vmin, vmax = scale.values
             values = np.linspace(vmax, vmin, len(levels))
         elif isinstance(scale.values, dict):
-            # TODO check dict not missing levels
+            self._check_dict_entries(levels, scale.values)
             values = [scale.values[x] for x in levels]
         elif isinstance(scale.values, list):
-            # TODO check list length
-            values = scale.values
+            values = self._check_list_length(levels, scale.values)
         else:
             # TODO nice error message
             assert False
@@ -198,7 +211,7 @@ class ObjectProperty(SemanticProperty):
         n = len(levels)
 
         if isinstance(scale.values, dict):
-            self._check_dict_not_missing_levels(levels, scale.values)
+            self._check_dict_entries(levels, scale.values)
             values = [scale.values[x] for x in levels]
         elif isinstance(scale.values, list):
             values = self._check_list_length(levels, scale.values)
@@ -453,7 +466,7 @@ class Color(SemanticProperty):
         values = scale.values
 
         if isinstance(values, dict):
-            self._check_dict_not_missing_levels(levels, values)
+            self._check_dict_entries(levels, values)
             # TODO where to ensure that dict values have consistent representation?
             colors = [values[x] for x in levels]
         elif isinstance(values, tuple):
@@ -526,28 +539,34 @@ class Fill(SemanticProperty):
     normed = False
 
     # TODO default to Nominal scale always?
+    # Actually this will just not work with Continuous (except 0/1), suggesting we need
+    # an abstraction for failing gracefully on bad Property <> Scale interactions
 
     def default_scale(self, data):
         return Nominal()
 
     def infer_scale(self, arg, data):
+        # TODO infer Boolean where possible?
         return Nominal(arg)
 
     def _default_values(self, n: int) -> list:
         """Return a list of n values, alternating True and False."""
         if n > 2:
             msg = " ".join([
-                "There are only two possible `fill` values,",
-                # TODO allowing each Property instance to have a variable name
-                # is useful for good error message, but disabling for now
-                # f"There are only two possible {self.variable} values,",
-                "so they will cycle and may produce an uninterpretable plot",
+                f"The variable assigned to {self.variable} has more than two levels,",
+                f"so {self.variable} values will cycle and may be uninterpretable",
             ])
+            # TODO fire in a "nice" way (see above)
             warnings.warn(msg, UserWarning)
         return [x for x, _ in zip(itertools.cycle([True, False]), range(n))]
 
     def get_mapping(self, scale, data):
 
+        # TODO categorical_order is going to return [False, True] for booleans,
+        # and [0, 1] for binary, but the default values order is [True, False].
+        # We should special case this to handle it properly, or change
+        # categorical_order to not "sort" booleans. Note that we need to sync with
+        # what's going to happen upstream in the scale, so we can't just do it here.
         order = categorical_order(data, scale.order)
 
         if isinstance(scale.values, pd.Series):
@@ -563,6 +582,7 @@ class Fill(SemanticProperty):
         elif scale.values is None:
             values = self._default_values(len(order))
         else:
+            # TODO interpolate variable name
             raise TypeError(f"Type of `values` ({type(scale.values)}) not understood.")
 
         def mapping(x):

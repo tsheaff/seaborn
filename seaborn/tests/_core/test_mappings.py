@@ -14,7 +14,6 @@ from seaborn._core.scales_take1 import (
     get_default_scale,
 )
 from seaborn._core.mappings import (
-    BooleanSemantic,
     ColorSemantic,
     WidthSemantic,
     EdgeWidthSemantic,
@@ -116,38 +115,6 @@ class TestColor(MappingsBase):
         assert len(mapped) == len(expected)
         for have, want in zip(mapped, expected):
             assert same_color(have, want)
-
-
-class TestBoolean(MappingsBase):
-
-    def test_default(self):
-
-        x = pd.Series(["a", "b"])
-        scale = self.default_scale(x)
-        m = BooleanSemantic(values=None, variable="").setup(x, scale)
-        assert m("a") is True
-        assert m("b") is False
-
-    def test_default_warns(self):
-
-        x = pd.Series(["a", "b", "c"])
-        s = BooleanSemantic(values=None, variable="fill")
-        msg = "There are only two possible fill values, so they will cycle"
-        scale = self.default_scale(x)
-        with pytest.warns(UserWarning, match=msg):
-            m = s.setup(x, scale)
-        assert m("a") is True
-        assert m("b") is False
-        assert m("c") is True
-
-    def test_provided_list(self):
-
-        x = pd.Series(["a", "b", "c"])
-        values = [True, True, False]
-        scale = self.default_scale(x)
-        m = BooleanSemantic(values, variable="").setup(x, scale)
-        for k, v in zip(x, values):
-            assert m(k) is v
 
 
 class ContinuousBase(MappingsBase):

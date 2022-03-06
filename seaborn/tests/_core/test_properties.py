@@ -5,13 +5,16 @@ import matplotlib as mpl
 from matplotlib.colors import same_color
 
 import pytest
+from numpy.testing import assert_array_equal
 
 from seaborn._core.rules import categorical_order
 from seaborn._core.scales import Nominal, Continuous
 from seaborn._core.properties import (
     Color,
     LineStyle,
+    LineWidth,
     Marker,
+    Fill,
 )
 from seaborn._compat import MarkerStyle
 from seaborn.palettes import color_palette
@@ -172,9 +175,9 @@ class ObjectPropertyBase(DataFixtures):
 
     def assert_equal(self, a, b):
 
-        assert a == b
+        assert self.unpack(a) == self.unpack(b)
 
-    def hashable(self, x):
+    def unpack(self, x):
         return x
 
     @pytest.mark.parametrize("data_type", ["cat", "num"])
@@ -258,7 +261,7 @@ class ObjectPropertyBase(DataFixtures):
         n = 24
         x = pd.Series(np.arange(n))
         mapping = self.prop().get_mapping(Nominal(), x)
-        assert len({self.hashable(x_i) for x_i in mapping(x)}) == n
+        assert len({self.unpack(x_i) for x_i in mapping(x)}) == n
 
 
 class TestMarker(ObjectPropertyBase):
@@ -267,14 +270,7 @@ class TestMarker(ObjectPropertyBase):
     values = ["o", (5, 2, 0), MarkerStyle("^")]
     standardized_values = [MarkerStyle(x) for x in values]
 
-    def assert_equal(self, a, b):
-
-        assert a.get_path() == b.get_path()
-        assert a.get_joinstyle() == b.get_joinstyle()
-        assert a.get_transform().to_values() == b.get_transform().to_values()
-        assert a.get_fillstyle() == b.get_fillstyle()
-
-    def hashable(self, x):
+    def unpack(self, x):
         return (
             x.get_path(),
             x.get_joinstyle(),
@@ -288,3 +284,109 @@ class TestLineStyle(ObjectPropertyBase):
     prop = LineStyle
     values = ["solid", "--", (1, .5)]
     standardized_values = [LineStyle._get_dash_pattern(x) for x in values]
+
+
+class TestFill(DataFixtures):
+
+    @pytest.fixture
+    def vectors(self):
+
+        return {
+            "cat": pd.Series(["a", "a", "b"]),
+            "num": pd.Series([1, 1, 2]),
+            "bool": pd.Series([True, True, False])
+        }
+
+    @pytest.fixture
+    def cat_vector(self, vectors):
+        return vectors["cat"]
+
+    @pytest.fixture
+    def num_vector(self, vectors):
+        return vectors["num"]
+
+    @pytest.mark.parametrize("data_type", ["cat", "num", "bool"])
+    def test_default(self, data_type, vectors):
+
+        x = vectors[data_type]
+        scale = Fill().default_scale(x)
+        assert isinstance(scale, Nominal)
+
+    @pytest.mark.parametrize("data_type", ["cat", "num", "bool"])
+    def test_inference_list(self, data_type, vectors):
+
+        x = vectors[data_type]
+        scale = Fill().infer_scale([True, False], x)
+        assert isinstance(scale, Nominal)
+        assert scale.values == [True, False]
+
+    @pytest.mark.parametrize("data_type", ["cat", "num", "bool"])
+    def test_inference_dict(self, data_type, vectors):
+
+        x = vectors[data_type]
+        values = dict(zip(x.unique(), [True, False]))
+        scale = Fill().infer_scale(values, x)
+        assert isinstance(scale, Nominal)
+        assert scale.values == values
+
+    def test_mapping_categorical_data(self, cat_vector):
+
+        mapping = Fill().get_mapping(Nominal(), cat_vector)
+        assert_array_equal(mapping([0, 1, 0]), [True, False, True])
+
+    def test_mapping_numeric_data(self, num_vector):
+
+        mapping = Fill().get_mapping(Nominal(), num_vector)
+        assert_array_equal(mapping([0, 1, 0]), [True, False, True])
+
+    def test_mapping_list(self, cat_vector):
+
+        mapping = Fill().get_mapping(Nominal([False, True]), cat_vector)
+        assert_array_equal(mapping([0, 1, 0]), [False, True, False])
+
+    def test_mapping_dict(self, cat_vector):
+
+        values = dict(zip(cat_vector.unique(), [False, True]))
+        mapping = Fill().get_mapping(Nominal(values), cat_vector)
+        assert_array_equal(mapping([0, 1, 0]), [False, True, False])
+
+    def test_cycle_warning(self):
+
+        x = pd.Series(["a", "b", "c"])
+        with pytest.warns(UserWarning, match="The variable assigned to fill"):
+            Fill().get_mapping(Nominal(), x)
+
+
+class SizedBase(DataFixtures):
+
+    def norm(self, x):
+        return (x - x.min()) / (x.max() - x.min())
+
+    @pytest.mark.parametrize("data_type,scale_class", [
+        ("cat", Nominal),
+        ("num", Continuous),
+    ])
+    def test_default(self, data_type, scale_class, vectors):
+
+        x = vectors[data_type]
+        scale = self.prop().default_scale(x)
+        assert isinstance(scale, scale_class)
+
+    @pytest.mark.parametrize("arg,data_type,scale_class", [
+        ((1, 3), "num", Continuous),
+        ([1, 2, 3], "cat", Nominal),
+        ([1, 2, 3], "num", Nominal),
+        ({"a": 1, "b": 3, "c": 2}, "cat", Nominal),
+        ({2: 1, 4: 3, 8: 2}, "num", Nominal),
+    ])
+    def test_inference(self, arg, data_type, scale_class, vectors):
+
+        x = vectors[data_type]
+        scale = self.prop().infer_scale(arg, x)
+        assert isinstance(scale, scale_class)
+        assert scale.values == arg
+
+
+class TestLineWidth(SizedBase):
+
+    prop = LineWidth
