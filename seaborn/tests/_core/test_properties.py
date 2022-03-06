@@ -10,11 +10,14 @@ from numpy.testing import assert_array_equal
 from seaborn._core.rules import categorical_order
 from seaborn._core.scales import Nominal, Continuous
 from seaborn._core.properties import (
+    Alpha,
     Color,
+    EdgeWidth,
+    Fill,
     LineStyle,
     LineWidth,
     Marker,
-    Fill,
+    PointSize,
 )
 from seaborn._compat import MarkerStyle
 from seaborn.palettes import color_palette
@@ -357,7 +360,7 @@ class TestFill(DataFixtures):
             Fill().get_mapping(Nominal(), x)
 
 
-class SizedBase(DataFixtures):
+class IntervalBase(DataFixtures):
 
     def norm(self, x):
         return (x - x.min()) / (x.max() - x.min())
@@ -386,7 +389,55 @@ class SizedBase(DataFixtures):
         assert isinstance(scale, scale_class)
         assert scale.values == arg
 
+    def test_mapped_interval_numeric(self, num_vector):
 
-class TestLineWidth(SizedBase):
+        mapping = self.prop().get_mapping(Continuous(), num_vector)
+        assert_array_equal(mapping([0, 1]), self.prop().default_range)
 
+    def test_mapped_interval_categorical(self, cat_vector):
+
+        mapping = self.prop().get_mapping(Nominal(), cat_vector)
+        n = cat_vector.nunique()
+        assert_array_equal(mapping([n - 1, 0]), self.prop().default_range)
+
+
+class TestAlpha(IntervalBase):
+    prop = Alpha
+
+
+class TestLineWidth(IntervalBase):
     prop = LineWidth
+
+    def test_rcparam_default(self):
+
+        with mpl.rc_context({"lines.linewidth": 2}):
+            assert self.prop().default_range == (1, 4)
+
+
+class TestEdgeWidth(IntervalBase):
+    prop = EdgeWidth
+
+    def test_rcparam_default(self):
+
+        with mpl.rc_context({"patch.linewidth": 2}):
+            assert self.prop().default_range == (1, 4)
+
+
+class TestPointSize(IntervalBase):
+    prop = PointSize
+
+    def test_areal_scaling_numeric(self, num_vector):
+
+        limits = 5, 10
+        scale = Continuous(limits)
+        mapping = self.prop().get_mapping(scale, num_vector)
+        x = np.linspace(0, 1, 6)
+        expected = np.sqrt(np.linspace(*np.square(limits), num=len(x)))
+        assert_array_equal(mapping(x), expected)
+
+    def test_areal_scaling_categorical(self, cat_vector):
+
+        limits = (2, 4)
+        scale = Nominal(limits)
+        mapping = self.prop().get_mapping(scale, cat_vector)
+        assert_array_equal(mapping(np.arange(3)), [4, np.sqrt(10), 2])

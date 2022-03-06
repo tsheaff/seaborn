@@ -12,7 +12,7 @@ from seaborn._core.scales import (
     Continuous,
 )
 from seaborn._core.properties import (
-    SizedProperty,
+    IntervalProperty,
     ObjectProperty,
     Coordinate,
     Alpha,
@@ -46,29 +46,29 @@ class TestContinuous:
         assert_series_equal(s(x), np.power(x, 3))
         assert_series_equal(s.invert_transform(s(x)), x)
 
-    def test_sized_defaults(self, x):
+    def test_interval_defaults(self, x):
 
-        s = Continuous().setup(x, SizedProperty())
+        s = Continuous().setup(x, IntervalProperty())
         assert_array_equal(s(x), [0, .25, 1])
         # TODO assert_series_equal(s.invert_transform(s(x)), x)
 
-    def test_sized_with_range(self, x):
+    def test_interval_with_range(self, x):
 
-        s = Continuous((1, 3)).setup(x, SizedProperty())
+        s = Continuous((1, 3)).setup(x, IntervalProperty())
         assert_array_equal(s(x), [1, 1.5, 3])
         # TODO assert_series_equal(s.invert_transform(s(x)), x)
 
-    def test_sized_with_norm(self, x):
+    def test_interval_with_norm(self, x):
 
-        s = Continuous(norm=(3, 7)).setup(x, SizedProperty())
+        s = Continuous(norm=(3, 7)).setup(x, IntervalProperty())
         assert_array_equal(s(x), [-.5, 0, 1.5])
         # TODO assert_series_equal(s.invert_transform(s(x)), x)
 
-    def test_sized_with_range_norm_and_transform(self, x):
+    def test_interval_with_range_norm_and_transform(self, x):
 
         x = pd.Series([1, 10, 100])
         # TODO param order?
-        s = Continuous((2, 3), (10, 100), "log").setup(x, SizedProperty())
+        s = Continuous((2, 3), (10, 100), "log").setup(x, IntervalProperty())
         assert_array_equal(s(x), [1, 2, 3])
         # TODO assert_series_equal(s.invert_transform(s(x)), x)
 
@@ -322,6 +322,45 @@ class TestNominal:
     def test_fill_nunique_warning(self):
 
         x = pd.Series(["a", "b", "c", "a", "b"], name="x")
-        with pytest.warns(UserWarning, match="There are only two possible"):
+        with pytest.warns(UserWarning, match="The variable assigned to fill"):
             s = Nominal().setup(x, Fill())
         assert_array_equal(s(x), [True, False, True, True, False])
+
+    def test_interval_defaults(self, x):
+
+        class MockProperty(IntervalProperty):
+            _default_range = (1, 2)
+
+        s = Nominal().setup(x, MockProperty())
+        assert_array_equal(s(x), [2, 1.5, 1, 1.5])
+
+    def test_interval_tuple(self, x):
+
+        s = Nominal((1, 2)).setup(x, IntervalProperty())
+        assert_array_equal(s(x), [2, 1.5, 1, 1.5])
+
+    def test_interval_tuple_numeric(self, y):
+
+        s = Nominal((1, 2)).setup(y, IntervalProperty())
+        assert_array_equal(s(y), [1.5, 2, 1, 2])
+
+    def test_interval_list(self, x):
+
+        vs = [2, 5, 4]
+        s = Nominal(vs).setup(x, IntervalProperty())
+        assert_array_equal(s(x), [2, 5, 4, 5])
+
+    def test_interval_dict(self, x):
+
+        vs = {"a": 3, "b": 4, "c": 6}
+        s = Nominal(vs).setup(x, IntervalProperty())
+        assert_array_equal(s(x), [3, 6, 4, 6])
+
+    def test_interval_with_transform(self, x):
+
+        class MockProperty(IntervalProperty):
+            _forward = np.square
+            _inverse = np.sqrt
+
+        s = Nominal((2, 4)).setup(x, MockProperty())
+        assert_array_equal(s(x), [4, np.sqrt(10), 2, np.sqrt(10)])

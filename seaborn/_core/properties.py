@@ -130,10 +130,16 @@ class SemanticProperty(Property):
     legend = True
 
 
-class SizedProperty(SemanticProperty):
+class IntervalProperty(SemanticProperty):
 
     # TODO pass default range to constructor and avoid defining a bunch of subclasses?
     _default_range: tuple[float, float] = (0, 1)
+
+    def _forward(self, values):
+        return values
+
+    def _inverse(self, values):
+        return values
 
     def infer_scale(self, arg, data):
 
@@ -151,26 +157,26 @@ class SizedProperty(SemanticProperty):
 
         levels = categorical_order(data, scale.order)
 
-        # TODO how to allow e.g. PointSize to sqrt transform here?
-
-        if scale.values is None:
-            vmin, vmax = self.default_range
-            values = np.linspace(vmax, vmin, len(levels))
-        elif isinstance(scale.values, tuple):
-            vmin, vmax = scale.values
-            values = np.linspace(vmax, vmin, len(levels))
-        elif isinstance(scale.values, dict):
+        if isinstance(scale.values, dict):
             self._check_dict_entries(levels, scale.values)
             values = [scale.values[x] for x in levels]
         elif isinstance(scale.values, list):
             values = self._check_list_length(levels, scale.values)
         else:
-            # TODO nice error message
-            assert False
+            if scale.values is None:
+                vmin, vmax = self.default_range
+            elif isinstance(scale.values, tuple):
+                vmin, vmax = scale.values
+            else:
+                # TODO nice error message
+                assert False
+
+            vmin, vmax = self._forward([vmin, vmax])
+            values = self._inverse(np.linspace(vmax, vmin, len(levels)))
 
         def mapping(x):
             ixs = np.asarray(x, np.intp)
-            out = np.full(x.shape, np.nan)
+            out = np.full(len(x), np.nan)
             use = np.isfinite(x)
             out[use] = np.take(values, ixs[use])
             return out
@@ -183,12 +189,13 @@ class SizedProperty(SemanticProperty):
             return self._get_categorical_mapping(scale, data)
 
         if scale.values is None:
-            vmin, vmax = self.default_range
+            vmin, vmax = self._forward(self.default_range)
         else:
-            vmin, vmax = scale.values
+            # TODO Nice error if values is not a double
+            vmin, vmax = self._forward(scale.values)
 
         def f(x):
-            return x * (vmax - vmin) + vmin
+            return self._inverse(np.asarray(x) * (vmax - vmin) + vmin)
 
         return f
 
@@ -240,18 +247,24 @@ class ObjectProperty(SemanticProperty):
         return values
 
 
-class PointSize(SizedProperty):
+class PointSize(IntervalProperty):
     _default_range = 2, 8
 
+    def _forward(self, values):
+        return np.square(values)
 
-class LineWidth(SizedProperty):
+    def _inverse(self, values):
+        return np.sqrt(values)
+
+
+class LineWidth(IntervalProperty):
     @property
     def default_range(self) -> tuple[float, float]:
         base = mpl.rcParams["lines.linewidth"]
         return base * .5, base * 2
 
 
-class EdgeWidth(SizedProperty):
+class EdgeWidth(IntervalProperty):
     @property
     def default_range(self) -> tuple[float, float]:
         base = mpl.rcParams["patch.linewidth"]
@@ -527,9 +540,7 @@ class Color(SemanticProperty):
         return _mapping
 
 
-class Alpha(SizedProperty):
-    # TODO Calling Alpha "Sized" seems wrong, but they share the basic mechanics
-    # aside from Alpha having an upper bound.
+class Alpha(IntervalProperty):
     _default_range = .15, .95
     # TODO validate that output is in [0, 1]
 

@@ -1,6 +1,5 @@
 import numpy as np
 import pandas as pd
-import matplotlib as mpl
 from matplotlib.scale import LinearScale
 from matplotlib.colors import Normalize, same_color
 
@@ -10,7 +9,6 @@ from numpy.testing import assert_array_equal
 from seaborn._core.rules import categorical_order
 from seaborn._core.scales_take1 import (
     DateTimeScale,
-    NumericScale,
     get_default_scale,
 )
 from seaborn._core.mappings import (
@@ -117,108 +115,7 @@ class TestColor(MappingsBase):
             assert same_color(have, want)
 
 
-class ContinuousBase(MappingsBase):
-
-    @staticmethod
-    def norm(x, vmin, vmax):
-        normed = x - vmin
-        normed /= vmax - vmin
-        return normed
-
-    @staticmethod
-    def transform(x, lo, hi):
-        return lo + x * (hi - lo)
-
-    def test_default_numeric(self):
-
-        x = pd.Series([-1, .4, 2, 1.2])
-        scale = self.default_scale(x)
-        y = self.semantic().setup(x, scale)(x)
-        normed = self.norm(x, x.min(), x.max())
-        expected = self.transform(normed, *self.semantic().default_range)
-        assert_array_equal(y, expected)
-
-    def test_default_categorical(self):
-
-        x = pd.Series(["a", "c", "b", "c"])
-        scale = self.default_scale(x)
-        y = self.semantic().setup(x, scale)(x)
-        normed = np.array([1, .5, 0, .5])
-        expected = self.transform(normed, *self.semantic().default_range)
-        assert_array_equal(y, expected)
-
-    def test_range_numeric(self):
-
-        values = (1, 5)
-        x = pd.Series([-1, .4, 2, 1.2])
-        scale = self.default_scale(x)
-        y = self.semantic(values).setup(x, scale)(x)
-        normed = self.norm(x, x.min(), x.max())
-        expected = self.transform(normed, *values)
-        assert_array_equal(y, expected)
-
-    def test_range_categorical(self):
-
-        values = (1, 5)
-        x = pd.Series(["a", "c", "b", "c"])
-        scale = self.default_scale(x)
-        y = self.semantic(values).setup(x, scale)(x)
-        normed = np.array([1, .5, 0, .5])
-        expected = self.transform(normed, *values)
-        assert_array_equal(y, expected)
-
-    def test_list_numeric(self):
-
-        values = [.3, .8, .5]
-        x = pd.Series([2, 500, 10, 500])
-        expected = [.3, .5, .8, .5]
-        scale = self.default_scale(x)
-        y = self.semantic(values).setup(x, scale)(x)
-        assert_array_equal(y, expected)
-
-    def test_list_categorical(self):
-
-        values = [.2, .6, .4]
-        x = pd.Series(["a", "c", "b", "c"])
-        expected = [.2, .6, .4, .6]
-        scale = self.default_scale(x)
-        y = self.semantic(values).setup(x, scale)(x)
-        assert_array_equal(y, expected)
-
-    def test_list_implies_categorical(self):
-
-        x = pd.Series([2, 500, 10, 500])
-        values = [.2, .6, .4]
-        expected = [.2, .4, .6, .4]
-        scale = self.default_scale(x)
-        y = self.semantic(values).setup(x, scale)(x)
-        assert_array_equal(y, expected)
-
-    def test_dict_numeric(self):
-
-        x = pd.Series([2, 500, 10, 500])
-        values = {2: .3, 500: .5, 10: .8}
-        scale = self.default_scale(x)
-        y = self.semantic(values).setup(x, scale)(x)
-        assert_array_equal(y, x.map(values))
-
-    def test_dict_categorical(self):
-
-        x = pd.Series(["a", "c", "b", "c"])
-        values = {"a": .3, "b": .5, "c": .8}
-        scale = self.default_scale(x)
-        y = self.semantic(values).setup(x, scale)(x)
-        assert_array_equal(y, x.map(values))
-
-    def test_norm_numeric(self):
-
-        x = pd.Series([2, 500, 10])
-        norm = mpl.colors.LogNorm(1, 100)
-        scale = NumericScale(LinearScale("x"), norm=norm)
-        y = self.semantic().setup(x, scale)(x)
-        x = np.asarray(x)  # matplotlib<3.4.3 compatability
-        expected = self.transform(norm(x), *self.semantic().default_range)
-        assert_array_equal(y, expected)
+class ContinuousBase:
 
     def test_default_datetime(self):
 
