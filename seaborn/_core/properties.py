@@ -74,8 +74,6 @@ class Property:
         if isinstance(arg, str) and any(arg.startswith(k) for k in trans_args):
             return Continuous(transform=arg)
 
-        # TODO should Property have a default transform, i.e. "sqrt" for PointSize?
-
         if var_type == "categorical":
             return Nominal(arg)
         else:
