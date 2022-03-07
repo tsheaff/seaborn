@@ -50,7 +50,7 @@ class TestContinuous:
 
         s = Continuous().setup(x, IntervalProperty())
         assert_array_equal(s(x), [0, .25, 1])
-        # TODO assert_series_equal(s.invert_transform(s(x)), x)
+        # assert_series_equal(s.invert_transform(s(x)), x)
 
     def test_interval_with_range(self, x):
 

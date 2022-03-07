@@ -11,7 +11,8 @@ from seaborn._core.rules import categorical_order
 
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
-    from typing import Any, Callable, Literal, Tuple, List, Optional, Union
+    from typing import Any, Callable, Literal, Tuple, Optional, Union
+    from collections.abc import Sequence
     from matplotlib.scale import ScaleBase as MatplotlibScale
     from pandas import Series
     from numpy.typing import ArrayLike
@@ -22,7 +23,7 @@ if TYPE_CHECKING:
     ]
 
     # TODO standardize String / ArrayLike interface
-    Pipeline = List[Optional[Callable[[Union[Series, ArrayLike]], ArrayLike]]]
+    Pipeline = Sequence[Optional[Callable[[Union[Series, ArrayLike]], ArrayLike]]]
 
 
 class Scale:
@@ -76,6 +77,8 @@ class Scale:
 @dataclass
 class ScaleSpec:
 
+    values: str | list | dict | tuple | None = None
+
     ...
     # TODO have Scale define width (/height?) (using data?), so e.g. nominal scale sets
     # width=1, continuous scale sets width min(diff(unique(data))), etc.
@@ -90,7 +93,6 @@ class ScaleSpec:
 class Nominal(ScaleSpec):
     # Categorical (convert to strings), un-sortable
 
-    values: str | list | dict | tuple | None = None
     order: list | None = None
 
     def setup(

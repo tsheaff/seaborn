@@ -31,26 +31,28 @@ if TYPE_CHECKING:
     ]
 
 
-class Property:
+# =================================================================================== #
+# Base classes
+# =================================================================================== #
 
-    legend = False
+
+class Property:
+    """Base class for visual properties that can be set directly or be data scaling."""
+
+    # When True, scales for this property will populate the legend by default
+    legend = True
+
+    # When True, scales for this property normalize data to [0, 1] before mapping
     normed = True
 
-    _default_range: tuple[float, float]
-
     def __init__(self, variable: str | None = None):
+        """Initialize the property with the name of the corresponding plot variable."""
         if not variable:
             variable = self.__class__.__name__.lower()
         self.variable = variable
 
-    @property
-    def default_range(self) -> tuple[float, float]:
-        return self._default_range
-
     def default_scale(self, data: Series) -> ScaleSpec:
-        # TODO do we need a separate default_scale method or can this be handled in
-        # infer_scale? The concern is that you'd want to pass arg=None, but in the
-        # Plot.scale interface var=None means identity scale, so that's confusing.
+        """Given data, initialize appropriate scale class."""
         # TODO use Boolean if we add that as a scale
         # TODO how will this handle data with units that can be treated as numeric
         # if passed through a registered matplotlib converter?
@@ -62,6 +64,7 @@ class Property:
             return Nominal()
 
     def infer_scale(self, arg: Any, data: Series) -> ScaleSpec:
+        """Given data and a scaling argument, initialize appropriate scale class."""
         # TODO what is best base-level default?
         var_type = variable_type(data)
 
@@ -81,9 +84,11 @@ class Property:
 
     def get_mapping(
         self, scale: ScaleSpec, data: Series
-    ) -> Callable[[ArrayLike], ArrayLike] | None:
-
-        return None
+    ) -> Callable[[ArrayLike], ArrayLike]:
+        """Return a function that maps from data domain to property range."""
+        def identity(x):
+            return x
+        return identity
 
     def _check_dict_entries(self, levels: list, values: dict) -> None:
         """Input check when values are provided as a dictionary."""
@@ -118,28 +123,42 @@ class Property:
         return values
 
 
-class Coordinate(Property):
+# =================================================================================== #
+# Properties relating to spatial position of marks on the plotting axes
+# =================================================================================== #
 
+
+class Coordinate(Property):
+    """The position of visual marks with respect to the axes of the plot."""
     legend = False
     normed = False
 
 
-class SemanticProperty(Property):
-    legend = True
+# =================================================================================== #
+# Properties with numeric values where scale range can be defined as an interval
+# =================================================================================== #
 
 
-class IntervalProperty(SemanticProperty):
+class IntervalProperty(Property):
+    """A numeric property where scale range can be defined as an interval."""
 
-    # TODO pass default range to constructor and avoid defining a bunch of subclasses?
     _default_range: tuple[float, float] = (0, 1)
 
-    def _forward(self, values):
+    @property
+    def default_range(self) -> tuple[float, float]:
+        """Min and max values used by default for semantic mapping."""
+        return self._default_range
+
+    def _forward(self, values: ArrayLike) -> ArrayLike:
+        """Transform applied to native values before linear mapping into interval."""
         return values
 
-    def _inverse(self, values):
+    def _inverse(self, values: ArrayLike) -> ArrayLike:
+        """Transform applied to results of mapping that returns to native values."""
         return values
 
-    def infer_scale(self, arg, data):
+    def infer_scale(self, arg: Any, data: Series) -> ScaleSpec:
+        """Given data and a scaling argument, initialize appropriate scale class."""
 
         # TODO infer continuous based on log/sqrt etc?
 
@@ -151,8 +170,28 @@ class IntervalProperty(SemanticProperty):
         else:
             return Continuous(arg)
 
-    def _get_categorical_mapping(self, scale, data):
+    def get_mapping(
+        self, scale: ScaleSpec, data: ArrayLike
+    ) -> Callable[[ArrayLike], ArrayLike]:
+        """Return a function that maps from data domain to property range."""
+        if isinstance(scale, Nominal):
+            return self._get_categorical_mapping(scale, data)
 
+        if scale.values is None:
+            vmin, vmax = self._forward(self.default_range)
+        else:
+            # TODO Nicer error if values is not a double
+            vmin, vmax = self._forward(scale.values)
+
+        def mapping(x):
+            return self._inverse(np.multiply(x, vmax - vmin) + vmin)
+
+        return mapping
+
+    def _get_categorical_mapping(
+        self, scale: Nominal, data: ArrayLike
+    ) -> Callable[[ArrayLike], ArrayLike]:
+        """Identify evenly-spaced values using interval or explicit mapping."""
         levels = categorical_order(data, scale.order)
 
         if isinstance(scale.values, dict):
@@ -181,29 +220,65 @@ class IntervalProperty(SemanticProperty):
 
         return mapping
 
-    def get_mapping(self, scale, data):
 
-        if isinstance(scale, Nominal):
-            return self._get_categorical_mapping(scale, data)
+class PointSize(IntervalProperty):
+    """Size (diameter) of a point mark."""
+    _default_range = 2, 8  # TODO use rcparams?
+    # TODO N.B. both Scatter and Dot use this but have different expected sizes
+    # Is that something we need to handle? Or assume Dot size rarely scaled?
+    # Also will Line marks have a PointSize property?
 
-        if scale.values is None:
-            vmin, vmax = self._forward(self.default_range)
-        else:
-            # TODO Nice error if values is not a double
-            vmin, vmax = self._forward(scale.values)
+    def _forward(self, values):
+        """Square native values to implement linear scaling of point area."""
+        return np.square(values)
 
-        def f(x):
-            return self._inverse(np.asarray(x) * (vmax - vmin) + vmin)
-
-        return f
+    def _inverse(self, values):
+        """Invert areal values back to point diameter."""
+        return np.sqrt(values)
 
 
-class ObjectProperty(SemanticProperty):
-    # TODO better name; this is unclear?
+class LineWidth(IntervalProperty):
+    """Thickness of a line mark."""
+    @property
+    def default_range(self) -> tuple[float, float]:
+        """Min and max values used by default for semantic mapping."""
+        base = mpl.rcParams["lines.linewidth"]
+        return base * .5, base * 2
 
+
+class EdgeWidth(IntervalProperty):
+    """Thickness of the edges on a patch mark."""
+    @property
+    def default_range(self) -> tuple[float, float]:
+        """Min and max values used by default for semantic mapping."""
+        base = mpl.rcParams["patch.linewidth"]
+        return base * .5, base * 2
+
+
+class Alpha(IntervalProperty):
+    """Opacity of the color values for an arbitrary mark."""
+    _default_range = .15, .95
+    # TODO validate that output is in [0, 1]
+
+
+# =================================================================================== #
+# Properties defined by arbitrary objects with inherently nominal scaling
+# =================================================================================== #
+
+
+class ObjectProperty(Property):
+
+    # Object to produce for null input data
     null_value: Any = None
+    normed = False
 
-    # TODO add abstraction for logic-free default scale type?
+    def _default_values(self, n):
+        raise NotImplementedError()
+
+    def _standardize_values(self, values):
+
+        return values
+
     def default_scale(self, data):
         return Nominal()
 
@@ -237,41 +312,8 @@ class ObjectProperty(SemanticProperty):
 
         return mapping
 
-    def _default_values(self, n):
-        raise NotImplementedError()
-
-    def _standardize_values(self, values):
-
-        return values
-
-
-class PointSize(IntervalProperty):
-    _default_range = 2, 8
-
-    def _forward(self, values):
-        return np.square(values)
-
-    def _inverse(self, values):
-        return np.sqrt(values)
-
-
-class LineWidth(IntervalProperty):
-    @property
-    def default_range(self) -> tuple[float, float]:
-        base = mpl.rcParams["lines.linewidth"]
-        return base * .5, base * 2
-
-
-class EdgeWidth(IntervalProperty):
-    @property
-    def default_range(self) -> tuple[float, float]:
-        base = mpl.rcParams["patch.linewidth"]
-        return base * .5, base * 2
-
 
 class Marker(ObjectProperty):
-
-    normed = False
 
     null_value = MarkerStyle("")
 
@@ -335,7 +377,11 @@ class LineStyle(ObjectProperty):
 
     null_value = ""
 
-    def _default_values(self, n: int):  # -> list[DashPatternWithOffset]:
+    def _standardize_values(self, values):
+        """Standardize values as dash pattern (with offset)."""
+        return [self._get_dash_pattern(x) for x in values]
+
+    def _default_values(self, n: int):  # TODO -> list[DashPatternWithOffset]:
         """Build an arbitrarily long list of unique dash styles for lines.
 
         Parameters
@@ -385,10 +431,6 @@ class LineStyle(ObjectProperty):
 
         return self._standardize_values(dashes)
 
-    def _standardize_values(self, values):
-        """Standardize values as dash pattern (with offset)."""
-        return [self._get_dash_pattern(x) for x in values]
-
     @staticmethod
     def _get_dash_pattern(style: str | DashPattern) -> DashPatternWithOffset:
         """Convert linestyle arguments to dash pattern with offset."""
@@ -426,7 +468,12 @@ class LineStyle(ObjectProperty):
         return offset, dashes
 
 
-class Color(SemanticProperty):
+# =================================================================================== #
+# Properties with  RGB(A) color values
+# =================================================================================== #
+
+
+class Color(Property):
 
     def infer_scale(self, arg, data) -> ScaleSpec:
 
@@ -538,25 +585,18 @@ class Color(SemanticProperty):
         return _mapping
 
 
-class Alpha(IntervalProperty):
-    _default_range = .15, .95
-    # TODO validate that output is in [0, 1]
+# =================================================================================== #
+# Properties that can take only boolean values
+# =================================================================================== #
 
 
-class Fill(SemanticProperty):
+class Fill(Property):
 
     normed = False
 
     # TODO default to Nominal scale always?
     # Actually this will just not work with Continuous (except 0/1), suggesting we need
     # an abstraction for failing gracefully on bad Property <> Scale interactions
-
-    def default_scale(self, data):
-        return Nominal()
-
-    def infer_scale(self, arg, data):
-        # TODO infer Boolean where possible?
-        return Nominal(arg)
 
     def _default_values(self, n: int) -> list:
         """Return a list of n values, alternating True and False."""
@@ -568,6 +608,13 @@ class Fill(SemanticProperty):
             # TODO fire in a "nice" way (see above)
             warnings.warn(msg, UserWarning)
         return [x for x, _ in zip(itertools.cycle([True, False]), range(n))]
+
+    def default_scale(self, data):
+        return Nominal()
+
+    def infer_scale(self, arg, data):
+        # TODO infer Boolean where possible?
+        return Nominal(arg)
 
     def get_mapping(self, scale, data):
 
@@ -598,6 +645,13 @@ class Fill(SemanticProperty):
             return np.take(values, np.asarray(x, np.intp))
 
         return mapping
+
+
+# =================================================================================== #
+# Enumeration of properties for use by Plot and Mark classes
+# =================================================================================== #
+# TODO turn this into a property registry with hooks, etc.
+# TODO Users do not interact directly with properties, so how to document them?
 
 
 PROPERTIES = {
