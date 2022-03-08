@@ -126,6 +126,16 @@ class TestColor(DataFixtures):
         with pytest.warns(UserWarning, match=msg):
             Color("edgecolor").get_mapping(Nominal(palette), cat_vector)
 
+    def test_bad_scale_values_continuous(self, num_vector):
+
+        with pytest.raises(TypeError, match="Scale values for color with a Continuous"):
+            Color().get_mapping(Continuous(["r", "g", "b"]), num_vector)
+
+    def test_bad_scale_values_nominal(self, cat_vector):
+
+        with pytest.raises(TypeError, match="Scale values for color with a Nominal"):
+            Color().get_mapping(Nominal(mpl.cm.get_cmap("viridis")), cat_vector)
+
     @pytest.mark.parametrize(
         "data_type,scale_class",
         [("cat", Nominal), ("num", Continuous)]
@@ -358,6 +368,12 @@ class TestFill(DataFixtures):
         x = pd.Series(["a", "b", "c"])
         with pytest.warns(UserWarning, match="The variable assigned to fill"):
             Fill().get_mapping(Nominal(), x)
+
+    def test_values_error(self):
+
+        x = pd.Series(["a", "b"])
+        with pytest.raises(TypeError, match="Scale values for fill must be"):
+            Fill().get_mapping(Nominal("bad_values"), x)
 
 
 class IntervalBase(DataFixtures):

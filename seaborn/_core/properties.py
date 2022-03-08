@@ -222,7 +222,7 @@ class IntervalProperty(Property):
 
 
 class PointSize(IntervalProperty):
-    """Size (diameter) of a point mark."""
+    """Size (diameter) of a point mark, in points, with scaling by area."""
     _default_range = 2, 8  # TODO use rcparams?
     # TODO N.B. both Scatter and Dot use this but have different expected sizes
     # Is that something we need to handle? Or assume Dot size rarely scaled?
@@ -238,7 +238,7 @@ class PointSize(IntervalProperty):
 
 
 class LineWidth(IntervalProperty):
-    """Thickness of a line mark."""
+    """Thickness of a line mark, in points."""
     @property
     def default_range(self) -> tuple[float, float]:
         """Min and max values used by default for semantic mapping."""
@@ -247,7 +247,7 @@ class LineWidth(IntervalProperty):
 
 
 class EdgeWidth(IntervalProperty):
-    """Thickness of the edges on a patch mark."""
+    """Thickness of the edges on a patch mark, in points."""
     @property
     def default_range(self) -> tuple[float, float]:
         """Min and max values used by default for semantic mapping."""
@@ -267,27 +267,33 @@ class Alpha(IntervalProperty):
 
 
 class ObjectProperty(Property):
-
-    # Object to produce for null input data
-    null_value: Any = None
+    """A property defined by arbitrary an object, with inherently nominal scaling."""
     normed = False
 
-    def _default_values(self, n):
+    # Object representing null data, should appear invisible when drawn by matplotlib
+    null_value: Any = None
+
+    def _default_values(self, n: int) -> list:
+        """Return n unique/discriminable instances of the objects."""
         raise NotImplementedError()
 
-    def _standardize_values(self, values):
-
+    def _standardize_values(self, values: list) -> list:
+        """Convert objects with multiple representations into a standardized one."""
         return values
 
-    def default_scale(self, data):
+    def default_scale(self, data: Series) -> Nominal:
+        """Convert objects with multiple representations into a standardized one."""
         return Nominal()
 
-    def infer_scale(self, arg, data):
+    def infer_scale(self, arg: Any, data: Series) -> Nominal:
         return Nominal(arg)
 
-    def get_mapping(self, scale, data):
-
-        levels = categorical_order(data, scale.order)
+    def get_mapping(
+        self, scale: ScaleSpec, data: Series,
+    ) -> Callable[[ArrayLike], list]:
+        """Define mapping as lookup into list of object values."""
+        order = getattr(scale, "order", None)
+        levels = categorical_order(data, order)
         n = len(levels)
 
         if isinstance(scale.values, dict):
@@ -314,22 +320,20 @@ class ObjectProperty(Property):
 
 
 class Marker(ObjectProperty):
-
+    """Shape of points in scatter-type marks or lines with data points marked."""
     null_value = MarkerStyle("")
 
     # TODO should we have named marker "palettes"? (e.g. see d3 options)
 
-    # TODO will need abstraction to share with LineStyle, etc.
-
     # TODO need some sort of "require_scale" functionality
     # to raise when we get the wrong kind explicitly specified
 
-    def _standardize_values(self, values):
-
+    def _standardize_values(self, values: list) -> list:
+        """Convert marker specifications into MarkerStyle objects."""
         return [MarkerStyle(x) for x in values]
 
     def _default_values(self, n: int) -> list[MarkerStyle]:
-        """Build an arbitrarily long list of unique marker styles for points.
+        """Build an arbitrarily long list of unique marker styles.
 
         Parameters
         ----------
@@ -374,7 +378,7 @@ class Marker(ObjectProperty):
 
 
 class LineStyle(ObjectProperty):
-
+    """Dash pattern for line-type marks."""
     null_value = ""
 
     def _standardize_values(self, values):
@@ -474,12 +478,13 @@ class LineStyle(ObjectProperty):
 
 
 class Color(Property):
-
-    def infer_scale(self, arg, data) -> ScaleSpec:
+    """Color, as RGB(A), scalable with nominal palettes or continuous gradients."""
+    def infer_scale(self, arg: Any, data: Series) -> ScaleSpec:
 
         # TODO when inferring Continuous without data, verify type
 
-        # TODO need to rethink the variable type system...
+        # TODO need to rethink the variable type system
+        # (e.g. boolean, ordered categories as Ordinal, etc)..
         var_type = variable_type(data, boolean_type="categorical")
 
         # TODO do color standardization on dict / list values?
@@ -508,17 +513,17 @@ class Color(Property):
         if arg in QUAL_PALETTES:
             return Nominal(arg)
 
-        if var_type == "categorical":
+        elif var_type == "categorical":
             return Nominal(arg)
 
-        if var_type == "numeric":
+        elif var_type == "numeric":
             return Continuous(arg)
 
         # TODO just to see when we get here
         assert False
 
     def _get_categorical_mapping(self, scale, data):
-
+        """Define mapping as lookup in list of discrete color values."""
         levels = categorical_order(data, scale.order)
         n = len(levels)
         values = scale.values
@@ -529,18 +534,24 @@ class Color(Property):
             colors = [values[x] for x in levels]
         elif isinstance(values, tuple):
             colors = blend_palette(values, n)
-        else:
-            if values is None:
-                if n <= len(get_color_cycle()):
-                    # Use current (global) default palette
-                    colors = color_palette(n_colors=n)
-                else:
-                    colors = color_palette("husl", n)
-            elif isinstance(values, list):
-                values = self._check_list_length(levels, scale.values)
-                colors = color_palette(values)
+        elif isinstance(values, list):
+            values = self._check_list_length(levels, scale.values)
+            colors = color_palette(values)
+        elif isinstance(values, str):
+            colors = color_palette(values, n)
+        elif values is None:
+            if n <= len(get_color_cycle()):
+                # Use current (global) default palette
+                colors = color_palette(n_colors=n)
             else:
-                colors = color_palette(values, n)
+                colors = color_palette("husl", n)
+        else:
+            scale_class = scale.__class__.__name__
+            msg = " ".join([
+                f"Scale values for {self.variable} with a {scale_class} mapping",
+                f"must be string, list, tuple, or dict; not {type(scale.values)}."
+            ])
+            raise TypeError(msg)
 
         def mapping(x):
             ixs = np.asarray(x, np.intp)
@@ -551,30 +562,34 @@ class Color(Property):
 
         return mapping
 
-    def get_mapping(self, scale, data):
-
+    def get_mapping(
+        self, scale: ScaleSpec, data: Series
+    ) -> Callable[[ArrayLike], ArrayLike]:
+        """Return a function that maps from data domain to color values."""
         # TODO what is best way to do this conditional?
+        # Should it be class-based or should classes have behavioral attributes?
         if isinstance(scale, Nominal):
             return self._get_categorical_mapping(scale, data)
 
-        elif scale.values is None:
-            # TODO data-dependent default type
-            # (Or should caller dispatch to function / dictionary mapping?)
+        if scale.values is None:
+            # TODO Rethink best default continuous color gradient
             mapping = color_palette("ch:", as_cmap=True)
         elif isinstance(scale.values, tuple):
             mapping = blend_palette(scale.values, as_cmap=True)
         elif isinstance(scale.values, str):
-            # TODO data-dependent return type?
-            # TODO for matplotlib colormaps this will clip, which is different behavior
+            # TODO for matplotlib colormaps this will clip extremes, which is
+            # different from what using the named colormap directly would do
+            # This may or may not be desireable.
             mapping = color_palette(scale.values, as_cmap=True)
         elif callable(scale.values):
             mapping = scale.values
-
-        # TODO is callable (i.e. colormap?)
-
-        # TODO just during dev
         else:
-            assert False
+            scale_class = scale.__class__.__name__
+            msg = " ".join([
+                f"Scale values for {self.variable} with a {scale_class} mapping",
+                f"must be string, tuple, or callable; not {type(scale.values)}."
+            ])
+            raise TypeError(msg)
 
         # TODO figure out better way to do this, maybe in color_palette?
         # Also note that this does not preserve alpha channels when given
@@ -586,12 +601,12 @@ class Color(Property):
 
 
 # =================================================================================== #
-# Properties that can take only boolean values
+# Properties that can take only two states
 # =================================================================================== #
 
 
 class Fill(Property):
-
+    """Boolean property of points/bars/patches that can be solid or outlined."""
     normed = False
 
     # TODO default to Nominal scale always?
@@ -609,37 +624,37 @@ class Fill(Property):
             warnings.warn(msg, UserWarning)
         return [x for x, _ in zip(itertools.cycle([True, False]), range(n))]
 
-    def default_scale(self, data):
+    def default_scale(self, data: Series) -> Nominal:
         return Nominal()
 
-    def infer_scale(self, arg, data):
+    def infer_scale(self, arg: Any, data: Series) -> ScaleSpec:
         # TODO infer Boolean where possible?
         return Nominal(arg)
 
-    def get_mapping(self, scale, data):
-
+    def get_mapping(
+        self, scale: ScaleSpec, data: Series
+    ) -> Callable[[ArrayLike], ArrayLike]:
+        """Return a function that maps each data value to True or False."""
         # TODO categorical_order is going to return [False, True] for booleans,
         # and [0, 1] for binary, but the default values order is [True, False].
         # We should special case this to handle it properly, or change
         # categorical_order to not "sort" booleans. Note that we need to sync with
         # what's going to happen upstream in the scale, so we can't just do it here.
-        order = categorical_order(data, scale.order)
+        order = getattr(scale, "order", None)
+        levels = categorical_order(data, order)
 
-        if isinstance(scale.values, pd.Series):
-            # What's best here? If we simply cast to bool, np.nan -> False, bad!
-            # "boolean"/BooleanDType, is described as experimental/subject to change
-            # But if we don't require any particular behavior, is that ok?
-            # See https://github.com/pandas-dev/pandas/issues/44293
-            values = scale.values.astype("boolean").to_list()
-        elif isinstance(scale.values, list):
+        if isinstance(scale.values, list):
             values = [bool(x) for x in scale.values]
         elif isinstance(scale.values, dict):
-            values = [bool(scale.values[x]) for x in order]
+            values = [bool(scale.values[x]) for x in levels]
         elif scale.values is None:
-            values = self._default_values(len(order))
+            values = self._default_values(len(levels))
         else:
-            # TODO interpolate variable name
-            raise TypeError(f"Type of `values` ({type(scale.values)}) not understood.")
+            msg = " ".join([
+                f"Scale values for {self.variable} must be a list or dict,",
+                f"not ({type(scale.values)})"
+            ])
+            raise TypeError(msg)
 
         def mapping(x):
             return np.take(values, np.asarray(x, np.intp))
