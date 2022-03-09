@@ -3,7 +3,6 @@ import itertools
 import warnings
 
 import numpy as np
-import pandas as pd
 import matplotlib as mpl
 
 from seaborn._core.scales import ScaleSpec, Nominal, Continuous
@@ -53,7 +52,7 @@ class Property:
 
     def default_scale(self, data: Series) -> ScaleSpec:
         """Given data, initialize appropriate scale class."""
-        # TODO use Boolean if we add that as a scale
+        # TODO allow variable_type to be "boolean" if that's a scale?
         # TODO how will this handle data with units that can be treated as numeric
         # if passed through a registered matplotlib converter?
         var_type = variable_type(data, boolean_type="categorical")
@@ -89,6 +88,10 @@ class Property:
         def identity(x):
             return x
         return identity
+
+    def standardize(self, values: Any) -> Any:
+        """Coerce property value(s) to standardized representation."""
+        return values
 
     def _check_dict_entries(self, levels: list, values: dict) -> None:
         """Input check when values are provided as a dictionary."""
@@ -179,9 +182,19 @@ class IntervalProperty(Property):
 
         if scale.values is None:
             vmin, vmax = self._forward(self.default_range)
-        else:
-            # TODO Nicer error if values is not a double
+        elif isinstance(scale.values, tuple) and len(scale.values) == 2:
             vmin, vmax = self._forward(scale.values)
+        else:
+            if isinstance(scale.values, tuple):
+                actual = f"{len(scale.values)}-tuple"
+            else:
+                actual = type(scale.values)
+            scale_class = scale.__class__.__name__
+            err = " ".join([
+                f"Values for {self.variable} variables with {scale_class} scale",
+                f"must be 2-tuple; not {actual}.",
+            ])
+            raise TypeError(err)
 
         def mapping(x):
             return self._inverse(np.multiply(x, vmax - vmin) + vmin)
@@ -205,8 +218,12 @@ class IntervalProperty(Property):
             elif isinstance(scale.values, tuple):
                 vmin, vmax = scale.values
             else:
-                # TODO nice error message
-                assert False
+                scale_class = scale.__class__.__name__
+                err = " ".join([
+                    f"Values for {self.variable} variables with {scale_class} scale",
+                    f"must be a dict, list or tuple; not {type(scale.values)}",
+                ])
+                raise TypeError(err)
 
             vmin, vmax = self._forward([vmin, vmax])
             values = self._inverse(np.linspace(vmax, vmin, len(levels)))
@@ -304,8 +321,11 @@ class ObjectProperty(Property):
         elif scale.values is None:
             values = self._default_values(n)
         else:
-            # TODO add nice error message
-            assert False, values
+            msg = " ".join([
+                f"Scale values for a {self.variable} variable must be provided",
+                f"in a dict or list; not {type(scale.values)}."
+            ])
+            raise TypeError(msg)
 
         values = self._standardize_values(values)
 
@@ -487,7 +507,6 @@ class Color(Property):
         # (e.g. boolean, ordered categories as Ordinal, etc)..
         var_type = variable_type(data, boolean_type="categorical")
 
-        # TODO do color standardization on dict / list values?
         if isinstance(arg, (dict, list)):
             return Nominal(arg)
 
@@ -508,19 +527,20 @@ class Color(Property):
         # - Temporal? (i.e. datetime)
         # - Boolean?
 
-        assert isinstance(arg, str)  # TODO sanity check for dev
+        if not isinstance(arg, str):
+            msg = " ".join([
+                f"A single scale argument for {self.variable} variables must be",
+                f"a string, dict, tuple, list, or callable, not {type(arg)}."
+            ])
+            raise TypeError(msg)
 
         if arg in QUAL_PALETTES:
             return Nominal(arg)
-
-        elif var_type == "categorical":
-            return Nominal(arg)
-
         elif var_type == "numeric":
             return Continuous(arg)
-
-        # TODO just to see when we get here
-        assert False
+        # TODO implement scales for date variables and any others.
+        else:
+            return Nominal(arg)
 
     def _get_categorical_mapping(self, scale, data):
         """Define mapping as lookup in list of discrete color values."""
@@ -651,8 +671,8 @@ class Fill(Property):
             values = self._default_values(len(levels))
         else:
             msg = " ".join([
-                f"Scale values for {self.variable} must be a list or dict,",
-                f"not ({type(scale.values)})"
+                f"Scale values for {self.variable} must be passed in",
+                f"a list or dict; not {type(scale.values)}."
             ])
             raise TypeError(msg)
 
@@ -684,4 +704,6 @@ PROPERTIES = {
     "pointsize": PointSize(),
     "linewidth": LineWidth(),
     "edgewidth": EdgeWidth(),
+    # TODO pattern?
+    # TODO gradient?
 }

@@ -136,6 +136,11 @@ class TestColor(DataFixtures):
         with pytest.raises(TypeError, match="Scale values for color with a Nominal"):
             Color().get_mapping(Nominal(mpl.cm.get_cmap("viridis")), cat_vector)
 
+    def test_bad_inference_arg(self, cat_vector):
+
+        with pytest.raises(TypeError, match="A single scale argument for color"):
+            Color().infer_scale(123, cat_vector)
+
     @pytest.mark.parametrize(
         "data_type,scale_class",
         [("cat", Nominal), ("num", Continuous)]
@@ -276,6 +281,12 @@ class ObjectPropertyBase(DataFixtures):
         mapping = self.prop().get_mapping(Nominal(), x)
         assert len({self.unpack(x_i) for x_i in mapping(x)}) == n
 
+    def test_bad_scale_values(self, cat_vector):
+
+        var_name = self.prop.__name__.lower()
+        with pytest.raises(TypeError, match=f"Scale values for a {var_name} variable"):
+            self.prop().get_mapping(Nominal(("o", "s")), cat_vector)
+
 
 class TestMarker(ObjectPropertyBase):
 
@@ -415,6 +426,26 @@ class IntervalBase(DataFixtures):
         mapping = self.prop().get_mapping(Nominal(), cat_vector)
         n = cat_vector.nunique()
         assert_array_equal(mapping([n - 1, 0]), self.prop().default_range)
+
+    def test_bad_scale_values_numeric_data(self, num_vector):
+
+        prop_name = self.prop.__name__.lower()
+        err_stem = (
+            f"Values for {prop_name} variables with Continuous scale must be 2-tuple"
+        )
+
+        with pytest.raises(TypeError, match=f"{err_stem}; not <class 'str'>."):
+            self.prop().get_mapping(Continuous("abc"), num_vector)
+
+        with pytest.raises(TypeError, match=f"{err_stem}; not 3-tuple."):
+            self.prop().get_mapping(Continuous((1, 2, 3)), num_vector)
+
+    def test_bad_scale_values_categorical_data(self, cat_vector):
+
+        prop_name = self.prop.__name__.lower()
+        err_text = f"Values for {prop_name} variables with Nominal scale"
+        with pytest.raises(TypeError, match=err_text):
+            self.prop().get_mapping(Nominal("abc"), cat_vector)
 
 
 class TestAlpha(IntervalBase):
