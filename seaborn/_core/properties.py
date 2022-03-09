@@ -4,6 +4,7 @@ import warnings
 
 import numpy as np
 import matplotlib as mpl
+from matplotlib.colors import to_rgb, to_rgba, to_rgba_array
 
 from seaborn._core.scales import ScaleSpec, Nominal, Continuous
 from seaborn._core.rules import categorical_order, variable_type
@@ -17,6 +18,10 @@ if TYPE_CHECKING:
     from pandas import Series
     from numpy.typing import ArrayLike
     from matplotlib.path import Path
+
+    RGBTuple = Tuple[float, float, float]
+    RGBATuple = Tuple[float, float, float, float]
+    ColorSpec = Union[RGBTuple, RGBATuple, str]
 
     DashPattern = Tuple[float, ...]
     DashPatternWithOffset = Tuple[float, Optional[DashPattern]]
@@ -89,9 +94,9 @@ class Property:
             return x
         return identity
 
-    def standardize(self, values: Any) -> Any:
-        """Coerce property value(s) to standardized representation."""
-        return values
+    def standardize(self, val: Any) -> Any:
+        """Coerce flexible property value to standardized representation."""
+        return val
 
     def _check_dict_entries(self, levels: list, values: dict) -> None:
         """Input check when values are provided as a dictionary."""
@@ -188,7 +193,7 @@ class IntervalProperty(Property):
             if isinstance(scale.values, tuple):
                 actual = f"{len(scale.values)}-tuple"
             else:
-                actual = type(scale.values)
+                actual = str(type(scale.values))
             scale_class = scale.__class__.__name__
             err = " ".join([
                 f"Values for {self.variable} variables with {scale_class} scale",
@@ -275,7 +280,7 @@ class EdgeWidth(IntervalProperty):
 class Alpha(IntervalProperty):
     """Opacity of the color values for an arbitrary mark."""
     _default_range = .15, .95
-    # TODO validate that output is in [0, 1]
+    # TODO validate / enforce that output is in [0, 1]
 
 
 # =================================================================================== #
@@ -291,15 +296,12 @@ class ObjectProperty(Property):
     null_value: Any = None
 
     def _default_values(self, n: int) -> list:
-        """Return n unique/discriminable instances of the objects."""
         raise NotImplementedError()
 
-    def _standardize_values(self, values: list) -> list:
-        """Convert objects with multiple representations into a standardized one."""
-        return values
+    def standardize(self, val: Any) -> Any:
+        return val
 
     def default_scale(self, data: Series) -> Nominal:
-        """Convert objects with multiple representations into a standardized one."""
         return Nominal()
 
     def infer_scale(self, arg: Any, data: Series) -> Nominal:
@@ -327,7 +329,7 @@ class ObjectProperty(Property):
             ])
             raise TypeError(msg)
 
-        values = self._standardize_values(values)
+        values = [self.standardize(x) for x in values]
 
         def mapping(x):
             ixs = np.asarray(x, np.intp)
@@ -348,9 +350,8 @@ class Marker(ObjectProperty):
     # TODO need some sort of "require_scale" functionality
     # to raise when we get the wrong kind explicitly specified
 
-    def _standardize_values(self, values: list) -> list:
-        """Convert marker specifications into MarkerStyle objects."""
-        return [MarkerStyle(x) for x in values]
+    def standardize(self, val: Any) -> MarkerStyle:
+        return MarkerStyle(val)
 
     def _default_values(self, n: int) -> list[MarkerStyle]:
         """Build an arbitrarily long list of unique marker styles.
@@ -401,11 +402,10 @@ class LineStyle(ObjectProperty):
     """Dash pattern for line-type marks."""
     null_value = ""
 
-    def _standardize_values(self, values):
-        """Standardize values as dash pattern (with offset)."""
-        return [self._get_dash_pattern(x) for x in values]
+    def standardize(self, val: str | DashPattern) -> DashPatternWithOffset:
+        return self._get_dash_pattern(val)
 
-    def _default_values(self, n: int):  # TODO -> list[DashPatternWithOffset]:
+    def _default_values(self, n: int) -> list[DashPatternWithOffset]:
         """Build an arbitrarily long list of unique dash styles for lines.
 
         Parameters
@@ -423,7 +423,7 @@ class LineStyle(ObjectProperty):
 
         """
         # Start with dash specs that are well distinguishable
-        dashes = [  # TODO : list[str | DashPattern] = [
+        dashes: list[str | DashPattern] = [
             "-",  # TODO do we need to handle this elsewhere for backcompat?
             (4, 1.5),
             (1, 1),
@@ -453,7 +453,7 @@ class LineStyle(ObjectProperty):
 
             p += 1
 
-        return self._standardize_values(dashes)
+        return [self._get_dash_pattern(x) for x in dashes]
 
     @staticmethod
     def _get_dash_pattern(style: str | DashPattern) -> DashPatternWithOffset:
@@ -499,8 +499,15 @@ class LineStyle(ObjectProperty):
 
 class Color(Property):
     """Color, as RGB(A), scalable with nominal palettes or continuous gradients."""
-    def infer_scale(self, arg: Any, data: Series) -> ScaleSpec:
+    def standardize(self, val: ColorSpec) -> RGBTuple | RGBATuple:
+        is_hex = str(val).startswith("#")
+        has_alpha = (is_hex and len(val) in (5, 9)) or len(val) == 4
+        if has_alpha:
+            return to_rgba(val)
+        else:
+            return to_rgb(val)
 
+    def infer_scale(self, arg: Any, data: Series) -> ScaleSpec:
         # TODO when inferring Continuous without data, verify type
 
         # TODO need to rethink the variable type system
@@ -542,6 +549,21 @@ class Color(Property):
         else:
             return Nominal(arg)
 
+    def _standardize_colors(self, colors: ArrayLike) -> ArrayLike:
+        """Convert color sequence to RGB(A) array, preserving but not adding alpha."""
+        def has_alpha(x):
+            return (str(x).startswith("#") and len(x) in (5, 9)) or len(x) == 4
+
+        if isinstance(colors, np.ndarray):
+            needs_alpha = colors.shape[1] == 4
+        else:
+            needs_alpha = any(has_alpha(x) for x in colors)
+
+        if needs_alpha:
+            return to_rgba_array(colors)
+        else:
+            return to_rgba_array(colors)[:, :3]
+
     def _get_categorical_mapping(self, scale, data):
         """Define mapping as lookup in list of discrete color values."""
         levels = categorical_order(data, scale.order)
@@ -552,11 +574,10 @@ class Color(Property):
             self._check_dict_entries(levels, values)
             # TODO where to ensure that dict values have consistent representation?
             colors = [values[x] for x in levels]
+        elif isinstance(values, list):
+            colors = self._check_list_length(levels, scale.values)
         elif isinstance(values, tuple):
             colors = blend_palette(values, n)
-        elif isinstance(values, list):
-            values = self._check_list_length(levels, scale.values)
-            colors = color_palette(values)
         elif isinstance(values, str):
             colors = color_palette(values, n)
         elif values is None:
@@ -573,10 +594,13 @@ class Color(Property):
             ])
             raise TypeError(msg)
 
+        # If color specified here has alpha channel, it will override alpha property
+        colors = self._standardize_colors(colors)
+
         def mapping(x):
             ixs = np.asarray(x, np.intp)
             use = np.isfinite(x)
-            out = np.full((len(ixs), 3), np.nan)  # TODO rgba?
+            out = np.full((len(ixs), colors.shape[1]), np.nan)
             out[use] = np.take(colors, ixs[use], axis=0)
             return out
 
@@ -595,6 +619,8 @@ class Color(Property):
             # TODO Rethink best default continuous color gradient
             mapping = color_palette("ch:", as_cmap=True)
         elif isinstance(scale.values, tuple):
+            # TODO blend_palette will strip alpha, but we should support
+            # interpolation on all four channels
             mapping = blend_palette(scale.values, as_cmap=True)
         elif isinstance(scale.values, str):
             # TODO for matplotlib colormaps this will clip extremes, which is
@@ -611,10 +637,9 @@ class Color(Property):
             ])
             raise TypeError(msg)
 
-        # TODO figure out better way to do this, maybe in color_palette?
-        # Also note that this does not preserve alpha channels when given
-        # as part of the range values, which we want.
         def _mapping(x):
+            # Remove alpha channel so it does not override alpha property downstream
+            # TODO this will need to be more flexible to support RGBA tuples (see above)
             return mapping(x)[:, :3]
 
         return _mapping
@@ -633,6 +658,9 @@ class Fill(Property):
     # Actually this will just not work with Continuous (except 0/1), suggesting we need
     # an abstraction for failing gracefully on bad Property <> Scale interactions
 
+    def standardize(self, val: Any) -> bool:
+        return bool(val)
+
     def _default_values(self, n: int) -> list:
         """Return a list of n values, alternating True and False."""
         if n > 2:
@@ -645,9 +673,11 @@ class Fill(Property):
         return [x for x, _ in zip(itertools.cycle([True, False]), range(n))]
 
     def default_scale(self, data: Series) -> Nominal:
+        """Given data, initialize appropriate scale class."""
         return Nominal()
 
     def infer_scale(self, arg: Any, data: Series) -> ScaleSpec:
+        """Given data and a scaling argument, initialize appropriate scale class."""
         # TODO infer Boolean where possible?
         return Nominal(arg)
 
