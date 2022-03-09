@@ -44,10 +44,10 @@ class Property:
     """Base class for visual properties that can be set directly or be data scaling."""
 
     # When True, scales for this property will populate the legend by default
-    legend = True
+    legend = False
 
     # When True, scales for this property normalize data to [0, 1] before mapping
-    normed = True
+    normed = False
 
     def __init__(self, variable: str | None = None):
         """Initialize the property with the name of the corresponding plot variable."""
@@ -149,6 +149,8 @@ class Coordinate(Property):
 
 class IntervalProperty(Property):
     """A numeric property where scale range can be defined as an interval."""
+    legend = True
+    normed = True
 
     _default_range: tuple[float, float] = (0, 1)
 
@@ -290,6 +292,7 @@ class Alpha(IntervalProperty):
 
 class ObjectProperty(Property):
     """A property defined by arbitrary an object, with inherently nominal scaling."""
+    legend = True
     normed = False
 
     # Object representing null data, should appear invisible when drawn by matplotlib
@@ -499,6 +502,9 @@ class LineStyle(ObjectProperty):
 
 class Color(Property):
     """Color, as RGB(A), scalable with nominal palettes or continuous gradients."""
+    legend = True
+    normed = True
+
     def standardize(self, val: ColorSpec) -> RGBTuple | RGBATuple:
         is_hex = str(val).startswith("#")
         has_alpha = (is_hex and len(val) in (5, 9)) or len(val) == 4
@@ -652,6 +658,7 @@ class Color(Property):
 
 class Fill(Property):
     """Boolean property of points/bars/patches that can be solid or outlined."""
+    legend = True
     normed = False
 
     # TODO default to Nominal scale always?
